@@ -1,0 +1,3500 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Mobile viewport: required so phones use the real device width instead of a desktop-sized virtual page. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>SDCC MACT Emulator - Instructor Code Review Report v0.1.5.2 Mobile</title>
+
+  <!--
+    ============================================================
+    SDCC MACT Emulator - Instructor Code Review Report
+    Mobile / Commented Edition
+    ============================================================
+
+    QUICK EDIT MAP
+    1. PAGE COLORS / SPACING:
+       - Start in the CSS :root block below.
+       - Main colors still use the original MACT dark theme, but common sizing values are grouped there.
+
+    2. PAGE LAYOUT:
+       - #topBar is the command area.
+       - #main holds the two main work zones.
+       - #left holds Program, Info, and Instructor Report.
+       - #right holds Canvas, Scrub bar, Stock, and Tool table.
+
+    3. MOBILE BEHAVIOR:
+       - Search for "MOBILE RESPONSIVE RULES" in the CSS.
+       - The desktop two-column layout becomes a stacked phone layout.
+       - The top command bar scrolls instead of pushing the drawing area off screen.
+       - The canvas supports touch panning and pinch zoom.
+
+    4. DEFAULT G-CODE:
+       - The starter program lives inside <textarea id="program">.
+
+    5. JAVASCRIPT:
+       - Search for the section labels like "Global state", "Parsing", "View controls", etc.
+       - Avoid editing the checker logic unless you are changing grading rules on purpose.
+
+    6. EASY EXIT / CLEANUP:
+       - Press Escape to pause playback, blur the active input/textarea, and collapse the Stock & Tools panel.
+       - This makes it easier to get out of edit fields on small screens.
+
+    This is still a single-file HTML tool. No server and no external JavaScript are required.
+  -->
+  <style>
+
+    /*
+      ============================================================
+      EDITABLE DESIGN TOKENS
+      ============================================================
+      Change these values first when adjusting mobile sizing, spacing,
+      or the overall MACT visual feel. Many legacy colors remain below
+      so the original theme is preserved, but these tokens control the
+      responsive shell and touch targets.
+    */
+    :root {
+      --mact-page-bg: #0b1020;
+      --mact-topbar-bg: #070b16;
+      --mact-panel-bg: #151b2f;
+      --mact-panel-border: #243256;
+      --mact-text: #f4f7ff;
+      --mact-highlight: #ffd447;
+      --mact-touch-target: 38px;
+      --mact-gap: 8px;
+      --mact-radius: 10px;
+      --mact-mobile-canvas-height: 58vh;
+      --mact-mobile-program-height: 42vh;
+    }
+
+    /*
+      Optional dyslexic font. The file can sit beside this HTML file.
+      If OpenDyslexic-Regular.otf is missing, the browser falls back to system-ui.
+    */
+    @font-face {
+      font-family: 'OpenDyslexic';
+      src: local('OpenDyslexic'),
+           url('OpenDyslexic-Regular.otf') format('opentype');
+    }
+
+    /* Main page shell. Desktop is app-like; mobile is allowed to scroll naturally. */
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      background: var(--mact-page-bg);
+      color: var(--mact-text);
+      font-family: system-ui, sans-serif;
+      font-size: 15px;
+      overflow: hidden;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+    body.dyslexic {
+      font-family: 'OpenDyslexic', system-ui, sans-serif;
+    }
+
+    /* Dyslexic mode must override the monospace editor fonts too.
+       This fixes the program textarea, generated report boxes, and prompt boxes. */
+    body.dyslexic textarea,
+    body.dyslexic #program,
+    body.dyslexic #assistantOutput .prompt-box {
+      font-family: 'OpenDyslexic', system-ui, sans-serif;
+      line-height: 1.55;
+      letter-spacing: 0.01em;
+    }
+    /* High-contrast mode overrides. Keep these simple for readability. */
+    body.highContrast {
+      background:#ffffff;
+      color:#000000;
+    }
+    body.highContrast #topBar {
+      background:#ffffff;
+      border-bottom:1px solid #000;
+      color:#000;
+    }
+    body.highContrast #left,
+    body.highContrast #right {
+      background:#ffffff;
+    }
+    body.highContrast .panel {
+      background:#f8fafc;
+      border-color:#000000;
+      color:#000000;
+    }
+    body.highContrast #canvas {
+      background:#ffffff;
+      border-color:#000000;
+    }
+    body.highContrast textarea {
+      background:#ffffff;
+      color:#111827;
+      border-color:#000000;
+    }
+    body.highContrast .tool-table th,
+    body.highContrast .tool-table td {
+      border-color:#000000;
+    }
+
+    /* Top command bar. On mobile this becomes sticky and vertically scrollable. */
+    #topBar {
+      flex: 0 0 auto;
+      padding: 8px 12px;
+      background: var(--mact-topbar-bg);
+      border-bottom:1px solid #222a3d;
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      align-items:center;
+      box-sizing:border-box;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      max-height: 34vh;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    .brand {
+      font-weight:600;
+      color: var(--mact-highlight);
+      margin-right:12px;
+      line-height:1.25;
+    }
+    .top-group {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex-wrap:wrap;
+      font-size:13px;
+    }
+
+    /* Shared button styling. Mobile overrides increase the touch area. */
+    button {
+      background:#1f6feb;
+      color:#f4f7ff;
+      border:1px solid #355ec4;
+      border-radius:999px;
+      padding:6px 11px;
+      min-height:var(--mact-touch-target);
+      font-size:13px;
+      cursor:pointer;
+      font-weight:500;
+    }
+    button:hover {
+      filter:brightness(1.05);
+    }
+    button:disabled {
+      opacity:0.5;
+      cursor:default;
+    }
+
+    .btn-load { background:#0ea5e9; border-color:#0284c7; color:#0f172a; }
+    .btn-play { background:#22c55e; border-color:#15803d; color:#022c22; }
+    .btn-pause { background:#f97316; border-color:#ea580c; color:#111827; }
+    .btn-step { background:#a855f7; border-color:#7e22ce; color:#0f172a; }
+    .btn-next-error { background:#ef4444; border-color:#b91c1c; color:#f9fafb; }
+    .btn-export { background:#eab308; border-color:#a16207; color:#111827; }
+    .btn-ai { background:#14b8a6; border-color:#0f766e; color:#022c22; }
+    .btn-ai-alt { background:#38bdf8; border-color:#0369a1; color:#082f49; }
+    .btn-secondary {
+      background:#111827;
+      border-color:#374151;
+      color:#e5e7eb;
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+    }
+
+    .toggle {
+      display:flex;
+      align-items:center;
+      gap:4px;
+      font-size:13px;
+      color:inherit;
+    }
+    .toggle input[type="checkbox"] {
+      width:16px;
+      height:16px;
+      accent-color:#ffd447;
+    }
+
+    #zoomLabel, #speedLabel {
+      font-size:13px;
+      opacity:0.8;
+    }
+
+    /* Main app layout. Desktop uses two columns; mobile stacks left/right panels. */
+    #main {
+      flex: 1 1 auto;
+      display:grid;
+      grid-template-columns:minmax(420px, 42vw) minmax(0, 1fr);
+      min-height:0;
+    }
+
+    /* Left work column: program editor, parser info, and report panel. */
+    #left {
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      padding:10px;
+      border-right:1px solid #222a3d;
+      background:#070b16;
+      box-sizing:border-box;
+      min-height:0;
+      min-width:0;
+      overflow:hidden;
+    }
+    /* Right work column: canvas/backplot, scrub controls, and setup dock. */
+    #right {
+      display:grid;
+      grid-template-rows:minmax(300px, 1fr) auto auto;
+      gap:8px;
+      padding:10px;
+      box-sizing:border-box;
+      min-height:0;
+      min-width:0;
+      overflow:hidden;
+    }
+
+    /* Reusable card/panel container. */
+    .panel {
+      background: var(--mact-panel-bg);
+      border:1px solid var(--mact-panel-border);
+      border-radius:var(--mact-radius);
+      padding:8px 10px;
+      box-shadow:0 0 6px rgba(0,0,0,0.5);
+      font-size:14px;
+      white-space:pre-wrap;
+      box-sizing:border-box;
+    }
+    .panel > div:first-child strong {
+      color:#ffd447;
+    }
+
+    .program-panel {
+      flex:1 1 auto;
+      min-height:220px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+    .info-panel {
+      flex:0 0 120px;
+      min-height:90px;
+      overflow:auto;
+      font-size:12px;
+    }
+    .assistant-panel {
+      flex:0 0 300px;
+      min-height:220px;
+      overflow:auto;
+    }
+
+    /* Text editors: program box plus generated report/prompt boxes. */
+    textarea {
+      width:100%;
+      flex:1;
+      min-height:0;
+      background:#050814;
+      color:#b9ffb9;
+      font-family:monospace;
+      border-radius:4px;
+      border:1px solid #243256;
+      padding:6px;
+      box-sizing:border-box;
+      font-size:14px;
+      resize:none;
+      overflow:auto;
+    }
+
+    /* Backplot canvas. touch-action:none allows mobile pan/pinch handling in JavaScript. */
+    #canvas {
+      width:100%;
+      height:100%;
+      min-height:260px;
+      background:#020309;
+      display:block;
+      cursor:grab;
+      touch-action:none;
+      border-radius:8px;
+      border:1px solid #243256;
+      box-sizing:border-box;
+    }
+    #canvas.panning { cursor:grabbing; }
+
+    .tool-panel {
+      margin-top:0;
+      overflow:visible;
+      align-self:stretch;
+    }
+    .tool-panel-title {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:2px;
+    }
+    .tool-panel-title span {
+      font-size:11px;
+      opacity:0.72;
+    }
+
+    .tool-grid {
+      display:grid;
+      grid-template-columns:minmax(240px, 0.8fr) minmax(340px, 1.2fr);
+      gap:10px;
+      margin-top:4px;
+      font-size:12px;
+      align-items:start;
+    }
+    .stock-block {
+      min-width:0;
+    }
+    .tools-block {
+      flex:1;
+      min-width:0;
+    }
+
+    .stock-row {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(72px, 1fr));
+      gap:4px;
+      margin-top:4px;
+    }
+    .stock-row label {
+      display:flex;
+      flex-direction:column;
+      font-size:11px;
+    }
+    .stock-row input[type="number"] {
+      width:100%;
+      box-sizing:border-box;
+      background:#050814;
+      border:1px solid #243256;
+      border-radius:4px;
+      color:#f9fafb;
+      padding:2px 3px;
+      font-size:12px;
+    }
+
+    .stock-clearance {
+      margin-top:4px;
+      display:flex;
+      align-items:center;
+      gap:4px;
+      font-size:11px;
+    }
+    .stock-clearance input[type="number"] {
+      width:70px;
+      box-sizing:border-box;
+      background:#050814;
+      border:1px solid #243256;
+      border-radius:4px;
+      color:#f9fafb;
+      padding:2px 3px;
+      font-size:12px;
+    }
+
+    .tool-table {
+      width:100%;
+      border-collapse:collapse;
+      margin-top:4px;
+      font-size:12px;
+    }
+    .tool-table th,
+    .tool-table td {
+      border:1px solid #243256;
+      padding:2px 4px;
+      text-align:left;
+    }
+    .tool-table th {
+      background:#1b2340;
+      color:#e5ecff;
+      font-weight:600;
+    }
+    .tool-table input[type="number"] {
+      width:100%;
+      box-sizing:border-box;
+      background:#050814;
+      border:1px solid #243256;
+      border-radius:4px;
+      color:#f9fafb;
+      padding:2px 3px;
+      font-size:12px;
+    }
+    .tool-table input[type="color"] {
+      width:100%;
+      height:22px;
+      padding:0;
+      border:none;
+      background:transparent;
+      cursor:pointer;
+    }
+
+    #scrubRow {
+      margin-top:6px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+    }
+    #scrubBar {
+      flex:1;
+    }
+
+
+
+    .assistant-panel {
+      flex:0 1 30%;
+      min-height:150px;
+      overflow:auto;
+      border-color:#0f766e;
+      background:linear-gradient(180deg,#10253a,#111827);
+    }
+    .assistant-header {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:6px;
+    }
+    .assistant-small {
+      font-size:11px;
+      opacity:0.78;
+      line-height:1.35;
+    }
+    #assistantStatus {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:58px;
+      border-radius:999px;
+      padding:2px 8px;
+      font-size:11px;
+      font-weight:700;
+      letter-spacing:0.04em;
+      text-transform:uppercase;
+      background:#334155;
+      color:#f8fafc;
+    }
+    #assistantStatus.pass { background:#16a34a; color:#052e16; }
+    #assistantStatus.caution { background:#facc15; color:#422006; }
+    #assistantStatus.stop { background:#ef4444; color:#fef2f2; }
+    #assistantStatus.working { background:#38bdf8; color:#082f49; }
+    #assistantOutput {
+      font-size:13px;
+      line-height:1.45;
+      white-space:normal;
+    }
+    #assistantOutput h3 {
+      margin:8px 0 4px;
+      font-size:14px;
+      color:#ffd447;
+    }
+    #assistantOutput ul {
+      margin:4px 0 8px 18px;
+      padding:0;
+    }
+    #assistantOutput li { margin:3px 0; }
+    #assistantOutput .issue {
+      border-left:3px solid #38bdf8;
+      padding:5px 7px;
+      margin:6px 0;
+      background:rgba(15,23,42,0.72);
+      border-radius:6px;
+    }
+    #assistantOutput .issue.stop { border-left-color:#ef4444; }
+    #assistantOutput .issue.caution { border-left-color:#facc15; }
+    #assistantOutput .issue.pass { border-left-color:#22c55e; }
+    #assistantOutput .line-tag {
+      display:inline-block;
+      font-family:monospace;
+      font-size:11px;
+      background:#020617;
+      border:1px solid #334155;
+      border-radius:999px;
+      padding:1px 6px;
+      margin-right:4px;
+      color:#bfdbfe;
+    }
+
+    #assistantOutput .prompt-box {
+      width:100%;
+      min-height:190px;
+      box-sizing:border-box;
+      background:#020617;
+      color:#e5f3ff;
+      border:1px solid #334155;
+      border-radius:8px;
+      padding:8px;
+      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:12px;
+      line-height:1.4;
+      resize:vertical;
+      white-space:pre;
+    }
+    #assistantOutput .assistant-actions {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin:8px 0;
+    }
+    #assistantOutput .mini-note {
+      font-size:12px;
+      opacity:0.86;
+      margin:4px 0 8px;
+    }
+    #assistantOutput .local-summary {
+      border:1px solid #334155;
+      border-radius:8px;
+      padding:6px 8px;
+      margin:6px 0;
+      background:rgba(2,6,23,0.55);
+    }
+
+    body.highContrast .assistant-panel {
+      background:#ffffff;
+      border-color:#000000;
+      color:#000000;
+    }
+    body.highContrast #assistantOutput .issue {
+      background:#f8fafc;
+      border-color:#000000;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+      outline:2px solid #ffd447;
+      outline-offset:2px;
+    }
+
+    .program-panel { flex:1 1 auto; }
+    .info-panel { flex:0 0 120px; }
+    .assistant-panel { flex:0 0 300px; }
+
+    #assistantOutput .rubric-table {
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+      margin:6px 0 8px;
+    }
+    #assistantOutput .rubric-table th,
+    #assistantOutput .rubric-table td {
+      border:1px solid #334155;
+      padding:4px 5px;
+      text-align:left;
+      vertical-align:top;
+    }
+    #assistantOutput .review-row label {
+      display:flex;
+      align-items:flex-start;
+      gap:6px;
+      cursor:pointer;
+    }
+    #assistantOutput .review-row input[type="checkbox"] {
+      margin-top:2px;
+      flex:0 0 auto;
+    }
+    #assistantOutput .report-controls {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:6px;
+      margin:6px 0 8px;
+    }
+    #assistantOutput .report-controls label {
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      font-size:12px;
+    }
+    #assistantOutput .report-controls input,
+    #assistantOutput .report-controls select {
+      background:#020617;
+      color:#e5f3ff;
+      border:1px solid #334155;
+      border-radius:6px;
+      padding:5px;
+    }
+
+    #assistantOutput .review-toolbar {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      align-items:center;
+      margin:8px 0;
+    }
+    #assistantOutput .review-counts {
+      display:grid;
+      grid-template-columns:repeat(3, minmax(90px,1fr));
+      gap:6px;
+      margin:8px 0;
+    }
+    #assistantOutput .count-card,
+    #assistantOutput .grade-card {
+      border:1px solid #334155;
+      border-radius:10px;
+      padding:7px 8px;
+      background:rgba(2,6,23,0.62);
+    }
+    #assistantOutput .count-card strong,
+    #assistantOutput .grade-card strong {
+      display:block;
+      color:#ffd447;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      margin-bottom:2px;
+    }
+    #assistantOutput .count-card span,
+    #assistantOutput .grade-card span {
+      font-size:16px;
+      font-weight:800;
+    }
+    #assistantOutput .grade-breakdown {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(160px,1fr));
+      gap:8px;
+      margin:8px 0;
+    }
+    #assistantOutput .issue-review-head {
+      display:flex;
+      gap:8px;
+      align-items:flex-start;
+      justify-content:space-between;
+    }
+    #assistantOutput .issue-review-main { flex:1 1 auto; }
+    #assistantOutput .issue-action {
+      flex:0 0 auto;
+      font-size:11px;
+      font-weight:700;
+      border-radius:999px;
+      padding:2px 7px;
+      border:1px solid #334155;
+      background:#020617;
+      color:#e5f3ff;
+      white-space:nowrap;
+    }
+    #assistantOutput .issue-note {
+      width:100%;
+      margin-top:5px;
+      min-height:28px;
+      background:#020617;
+      color:#e5f3ff;
+      border:1px solid #334155;
+      border-radius:6px;
+      padding:5px;
+      resize:vertical;
+      font-size:12px;
+      box-sizing:border-box;
+    }
+    #assistantOutput .clean-report {
+      border:1px solid #475569;
+      border-radius:12px;
+      padding:10px;
+      background:linear-gradient(180deg, rgba(15,23,42,.92), rgba(2,6,23,.85));
+      margin:8px 0;
+    }
+
+
+    /* Collapsible Stock & Tools dock. <details> keeps it easy to close on small screens. */
+    .setup-dock {
+      padding:0;
+      overflow:visible;
+      align-self:stretch;
+      white-space:normal;
+    }
+    .setup-dock summary {
+      list-style:none;
+      display:grid;
+      grid-template-columns:auto 1fr auto;
+      align-items:center;
+      gap:10px;
+      padding:8px 10px;
+      cursor:pointer;
+      user-select:none;
+      border-radius:8px;
+      background:linear-gradient(90deg, rgba(15,23,42,0.95), rgba(30,41,59,0.82));
+    }
+    .setup-dock summary::-webkit-details-marker { display:none; }
+    .setup-dock summary::after {
+      content:'Edit setup';
+      font-size:11px;
+      color:#93c5fd;
+      border:1px solid #334155;
+      border-radius:999px;
+      padding:3px 8px;
+      white-space:nowrap;
+    }
+    .setup-dock[open] summary::after { content:'Collapse setup'; }
+    .setup-summary {
+      display:flex;
+      flex-wrap:wrap;
+      gap:5px;
+      justify-content:flex-end;
+      min-width:0;
+    }
+    .setup-chip {
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      border:1px solid #334155;
+      background:rgba(2,6,23,0.55);
+      color:#dbeafe;
+      border-radius:999px;
+      padding:2px 7px;
+      font-size:11px;
+      line-height:1.3;
+      white-space:nowrap;
+    }
+    .setup-dock-body {
+      padding:8px 10px 10px;
+      border-top:1px solid #243256;
+    }
+    .tool-panel-title { margin:0; }
+    .tool-grid.compact {
+      display:grid;
+      grid-template-columns:minmax(200px, .75fr) minmax(320px, 1.25fr);
+      gap:8px;
+      margin-top:0;
+      align-items:start;
+    }
+    .tool-grid.compact .stock-row {
+      grid-template-columns:repeat(5, minmax(62px, 1fr));
+      align-items:end;
+    }
+    .tool-grid.compact .stock-clearance {
+      margin-top:0;
+      align-self:end;
+    }
+    .tool-grid.compact .tool-table {
+      font-size:11px;
+      margin-top:2px;
+    }
+    .tool-grid.compact .tool-table th,
+    .tool-grid.compact .tool-table td {
+      padding:2px 3px;
+    }
+    .tool-grid.compact .tool-table input[type="number"] {
+      padding:1px 3px;
+      font-size:11px;
+    }
+    .tool-grid.compact .tool-table input[type="color"] {
+      height:18px;
+    }
+    .setup-footer {
+      margin-top:5px;
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      font-size:11px;
+      opacity:.9;
+    }
+
+
+
+    /*
+      ============================================================
+      MOBILE RESPONSIVE RULES
+      ============================================================
+      These rules are intentionally grouped at the end of the CSS so they
+      are easy to find. Adjust the breakpoint values here when changing
+      phone/tablet behavior.
+    */
+
+    /* Tablet and small laptop: tighten the shell before switching to phone layout. */
+    @media (max-width: 1180px) {
+      #main {
+        grid-template-columns:minmax(360px, 44vw) minmax(0, 1fr);
+      }
+      .tool-grid.compact {
+        grid-template-columns:1fr;
+      }
+      .tools-block {
+        overflow-x:auto;
+      }
+      .tool-table {
+        min-width:420px;
+      }
+    }
+
+    /* Phone / narrow tablet: stack everything and let the page scroll. */
+    @media (max-width: 980px) {
+      html, body {
+        height:auto;
+        min-height:100vh;
+        min-height:100dvh;
+        overflow:auto;
+      }
+      #topBar {
+        align-items:flex-start;
+        gap:8px;
+        padding:8px;
+        max-height:42vh;
+        overflow-y:auto;
+      }
+      .brand {
+        flex:1 0 100%;
+        margin-right:0;
+        font-size:14px;
+      }
+      .top-group {
+        flex:1 1 100%;
+        gap:6px;
+      }
+      .top-group button {
+        flex:1 1 auto;
+      }
+      button,
+      input[type="range"],
+      input[type="checkbox"] {
+        min-height:var(--mact-touch-target);
+      }
+      #main {
+        display:flex;
+        flex-direction:column;
+        min-height:0;
+        overflow:visible;
+      }
+      #left {
+        width:100%;
+        border-right:none;
+        border-bottom:1px solid #222a3d;
+        max-height:none;
+        overflow:visible;
+      }
+      #right {
+        width:100%;
+        margin-top:0;
+        display:flex;
+        flex-direction:column;
+        overflow:visible;
+      }
+      .program-panel {
+        min-height:var(--mact-mobile-program-height);
+      }
+      .assistant-panel {
+        flex:0 0 auto;
+        min-height:220px;
+        max-height:none;
+      }
+      .info-panel {
+        flex:0 0 auto;
+        min-height:90px;
+        max-height:160px;
+      }
+      textarea {
+        min-height:180px;
+        resize:vertical;
+        font-size:clamp(13px, 3.4vw, 15px);
+      }
+      #canvas {
+        height:var(--mact-mobile-canvas-height);
+        min-height:300px;
+        max-height:620px;
+      }
+      #scrubRow {
+        position:sticky;
+        bottom:0;
+        background:#0b1020;
+        padding:8px 4px;
+        z-index:5;
+      }
+      .tool-panel {
+        flex:0 0 auto;
+        max-height:none;
+        overflow:visible;
+      }
+      .tool-grid,
+      .tool-grid.compact {
+        grid-template-columns:1fr;
+      }
+      .tool-grid.compact .stock-row,
+      .stock-row {
+        grid-template-columns:repeat(2, minmax(72px, 1fr));
+      }
+      .tools-block {
+        overflow-x:auto;
+      }
+      .tool-table {
+        min-width:420px;
+      }
+      #assistantOutput .report-controls,
+      #assistantOutput .review-counts,
+      #assistantOutput .grade-breakdown {
+        grid-template-columns:1fr;
+      }
+      #assistantOutput .prompt-box {
+        min-height:260px;
+      }
+    }
+
+    /* Very small phones: use full-width buttons and reduce visual clutter. */
+    @media (max-width: 560px) {
+      :root {
+        --mact-touch-target: 42px;
+        --mact-mobile-canvas-height: 52vh;
+        --mact-mobile-program-height: 38vh;
+      }
+      #topBar {
+        max-height:46vh;
+      }
+      .top-group {
+        display:grid;
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+        width:100%;
+      }
+      .top-group .toggle {
+        grid-column:span 2;
+      }
+      .top-group button {
+        width:100%;
+        padding-inline:8px;
+      }
+      #left,
+      #right {
+        padding:8px;
+      }
+      .panel {
+        padding:8px;
+      }
+      #canvas {
+        min-height:260px;
+      }
+      .assistant-header {
+        align-items:flex-start;
+      }
+      .setup-dock summary {
+        grid-template-columns:1fr;
+      }
+      .setup-summary {
+        justify-content:flex-start;
+      }
+    }
+
+  </style>
+</head>
+<body>
+  <!-- VERSION NOTE: Student-facing file. This version keeps code review/reporting tools but removes AI prompt tools and grade/point values. -->
+  <!-- TOP COMMAND BAR: buttons, speed control, and accessibility toggles. -->
+  <div id="topBar">
+    <span class="brand">SDCC MACT Emulator v0.1.5.2 — Student Code Review Report</span>
+
+    <div class="top-group">
+      <button type="button" class="btn-load" onclick="loadAndDraw()">Load &amp; Draw</button>
+      <button type="button" class="btn-secondary" onclick="triggerFileLoad()">Load File</button>
+      <button type="button" class="btn-secondary" onclick="saveProgramAsNC()">Save .NC</button>
+      <button type="button" class="btn-play" onclick="startPlay()">Play</button>
+      <button type="button" class="btn-pause" onclick="pausePlay()">Pause</button>
+      <button type="button" class="btn-step" onclick="stepOnce()">Step</button>
+      <button type="button" class="btn-next-error" onclick="jumpToNextError()">Next Error</button>
+      <button type="button" class="btn-export" onclick="exportPNG()">Export PNG</button>
+      <button type="button" class="btn-ai" onclick="reviewIssuesForFixing()">Review Issues</button>
+      <button type="button" class="btn-ai" onclick="generateFixReport()">Generate Fix Report</button>
+      
+      <button type="button" class="btn-ai-alt" onclick="copyFixReport()">Copy Report to Clipboard</button>
+      <button type="button" class="btn-ai-alt" onclick="downloadFixReport()">Download Report</button>
+    </div>
+
+    <div class="top-group">
+      <button type="button" onclick="zoomIn()">Zoom +</button>
+      <button type="button" onclick="zoomOut()">Zoom -</button>
+      <button type="button" onclick="resetView()">Fit</button>
+      <span id="zoomLabel">Zoom: 1.00x</span>
+    </div>
+
+    <div class="top-group">
+      <label class="toggle">
+        Speed
+        <input type="range" id="speedSlider" min="0.25" max="4" step="0.25" value="1">
+        <span id="speedLabel">1.00×</span>
+      </label>
+    </div>
+
+    <div class="top-group">
+      <label class="toggle">
+        <input type="checkbox" id="pauseM0" checked>
+        M0 pause
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="pauseM1" checked>
+        M1 pause
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="loopPlayback">
+        Loop
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="useDyslexic">
+        Dyslexic font
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="highContrast">
+        High contrast
+      </label>
+    </div>
+  </div>
+
+  <!-- MAIN WORK AREA: desktop uses two columns; mobile stacks these sections vertically. -->
+  <div id="main">
+    <!-- LEFT PANEL: program editor, parser info, and student code review report. -->
+    <div id="left">
+      <div class="panel program-panel">
+        <div><strong>Program</strong> (click a line to jump)</div>
+        <textarea id="program">%
+O1500 (SDCC MACT CENTERLINE 4 TOOLS)
+(HAAS AND FADAL VMC FRIENDLY)
+(G54 X0 Y0 LOWER LEFT OF LETTER LAYOUT)
+(Z0 TOP OF PART)
+(CUT DEPTH Z-.030)
+(NO CUTTER COMP CENTERLINE ONLY)
+
+G20 G17 G40 G49 G80 G90 G94
+
+(TOOL 1 CUTS S AND D)
+T1 M06
+S6000 M03
+G54 G90 G00 X.650 Y2.400
+G43 H01 Z.100
+M08
+
+G00 Z.050
+G01 Z-.030 F8.0
+G01 X0.000 Y2.400 F20.0
+G01 X0.000 Y1.900
+G01 X.650 Y1.900
+G01 X.650 Y1.400
+G01 X0.000 Y1.400
+G00 Z.100
+
+G00 X.900 Y1.400
+G01 Z-.030 F8.0
+G01 X.900 Y2.400 F20.0
+G01 X1.550 Y2.400
+G01 X1.550 Y1.400
+G01 X.900 Y1.400
+G00 Z.100
+
+M09
+M05
+
+(TOOL 2 CUTS C AND C)
+T2 M06
+S6000 M03
+G54 G90 G00 X2.450 Y2.400
+G43 H02 Z.100
+M08
+
+G00 Z.050
+G01 Z-.030 F8.0
+G01 X1.800 Y2.400 F20.0
+G01 X1.800 Y1.400
+G01 X2.450 Y1.400
+G00 Z.100
+
+G00 X3.350 Y2.400
+G01 Z-.030 F8.0
+G01 X2.700 Y2.400 F20.0
+G01 X2.700 Y1.400
+G01 X3.350 Y1.400
+G00 Z.100
+
+M09
+M05
+
+(TOOL 3 CUTS M AND A)
+T3 M06
+S6000 M03
+G54 G90 G00 X0.000 Y0.000
+G43 H03 Z.100
+M08
+
+G00 Z.050
+G01 Z-.030 F8.0
+G01 X0.000 Y1.000 F20.0
+G01 X.350 Y.500
+G01 X.700 Y1.000
+G01 X.700 Y0.000
+G00 Z.100
+
+G00 X.950 Y0.000
+G01 Z-.030 F8.0
+G01 X1.275 Y1.000 F20.0
+G01 X1.600 Y0.000
+G00 Z.100
+G00 X1.100 Y.500
+G01 Z-.030 F8.0
+G01 X1.450 Y.500 F20.0
+G00 Z.100
+
+M09
+M05
+
+(TOOL 4 CUTS C AND T)
+T4 M06
+S6000 M03
+G54 G90 G00 X2.450 Y1.000
+G43 H04 Z.100
+M08
+
+G00 Z.050
+G01 Z-.030 F8.0
+G01 X1.800 Y1.000 F20.0
+G01 X1.800 Y0.000
+G01 X2.450 Y0.000
+G00 Z.100
+
+G00 X2.700 Y1.000
+G01 Z-.030 F8.0
+G01 X3.350 Y1.000 F20.0
+G00 Z.100
+G00 X3.025 Y1.000
+G01 Z-.030 F8.0
+G01 X3.025 Y0.000 F20.0
+G00 Z.100
+
+M09
+M05
+G00 Z1.000
+G00 X0.000 Y0.000
+M30
+%</textarea>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+          <button type="button" class="btn-secondary" onclick="renumberLines()">Renumber N-lines</button>
+          <button type="button" class="btn-secondary" onclick="insertNLines()">Insert N-lines</button>
+          <button type="button" class="btn-secondary" onclick="removeLineNumbers()">Remove N-lines</button>
+        </div>
+      </div>
+
+      <div class="panel info-panel" id="info"></div>
+
+      <div class="panel assistant-panel" id="assistantPanel">
+        <div class="assistant-header">
+          <strong>Student Code Review Report</strong>
+          <span id="assistantStatus">Ready</span>
+        </div>
+        <div class="assistant-small">Student-facing code review aid. The local checker flags possible issues; you still need to verify the code and make corrections carefully.</div>
+        <div id="assistantOutput" style="margin-top:8px;">Run <strong>Review Issues</strong> first. Check or uncheck false positives, then generate a correction report. This version stays single-file and does not send data anywhere.</div>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL: visual backplot, scrub bar, stock, and tool table. -->
+    <div id="right">
+      <!-- Backplot canvas. JavaScript draws all G-code motion here. -->
+      <canvas id="canvas"></canvas>
+
+      <div id="scrubRow">
+        <input id="scrubBar" type="range" min="0" max="0" value="0" disabled>
+        <span id="scrubLabel">Move: 0 / 0</span>
+      </div>
+
+      <!-- Stock and tool settings. This is collapsible so it is easy to close on mobile. -->
+      <details class="panel tool-panel setup-dock" id="setupDock">
+        <summary>
+          <strong>Stock &amp; Tools</strong>
+          <span class="setup-summary" id="setupSummary">
+            <span class="setup-chip">Clearance Z: 0.100</span>
+            <span class="setup-chip">Tools: 3</span>
+            <span class="setup-chip">Stock: not set</span>
+          </span>
+        </summary>
+        <div class="setup-dock-body">
+          <div class="tool-grid compact">
+            <div class="stock-block">
+              <div><strong>Stock / Clearance</strong></div>
+              <div class="stock-row">
+                <label>Min X
+                  <input id="stockMinX" type="number" step="0.001">
+                </label>
+                <label>Max X
+                  <input id="stockMaxX" type="number" step="0.001">
+                </label>
+                <label>Min Y
+                  <input id="stockMinY" type="number" step="0.001">
+                </label>
+                <label>Max Y
+                  <input id="stockMaxY" type="number" step="0.001">
+                </label>
+                <label>Clearance Z
+                  <input id="clearanceZ" type="number" step="0.001" value="0.1">
+                </label>
+              </div>
+            </div>
+
+            <div class="tools-block">
+              <div><strong>Tool Table</strong> <span style="opacity:.72; font-size:11px;">T#, diameter, color</span></div>
+            <table id="toolTable" class="tool-table">
+              <thead>
+                <tr>
+                  <th style="width:25%;">Tool #</th>
+                  <th style="width:45%;">Diameter (in)</th>
+                  <th style="width:30%;">Color</th>
+                </tr>
+              </thead>
+              <tbody id="toolTableBody">
+                <tr class="tool-row">
+                  <td><input type="number" min="1" step="1" value="1" class="tool-num"></td>
+                  <td><input type="number" min="0" step="0.001" value="0.625" class="tool-dia"></td>
+                  <td><input type="color" value="#00ffff" class="tool-color"></td>
+                </tr>
+                <tr class="tool-row">
+                  <td><input type="number" min="1" step="1" value="2" class="tool-num"></td>
+                  <td><input type="number" min="0" step="0.001" value="0.25" class="tool-dia"></td>
+                  <td><input type="color" value="#ff00ff" class="tool-color"></td>
+                </tr>
+                <tr class="tool-row">
+                  <td><input type="number" min="1" step="1" value="3" class="tool-num"></td>
+                  <td><input type="number" min="0" step="0.001" class="tool-dia"></td>
+                  <td><input type="color" value="#ffaa00" class="tool-color"></td>
+                </tr>
+              </tbody>
+            </table>
+              <div class="setup-footer">
+                <button type="button" class="btn-secondary" onclick="addToolRow(); updateSetupSummary();">Add Tool Row</button>
+                <span>Leave tool # or diameter blank to ignore that row.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- Hidden file input used by the Load File button. -->
+  <input id="fileInput" type="file" accept=".nc,.txt,.tap,.gcode,text/plain" style="display:none" />
+
+<script>
+/*
+  ============================================================
+  JAVASCRIPT SECTION MAP
+  ============================================================
+  Global state .......... machine position, parsed moves, playback
+  Tool & stock helpers .. tool table, stock bounds, clearance values
+  Parsing ............... converts G-code text into word/address data
+  Checker helpers ....... MACT/Haas grading and safety checks
+  Drawing ............... canvas backplot and visual display
+  View controls ......... zoom, fit, pan, mobile touch support
+  Playback .............. play, pause, step, scrub bar
+  Save/load ............. NC file loading and downloading
+  N-line helpers ........ renumber, insert, and remove N-lines
+  Code review report ..... issue review, correction report, copy/download tools
+  Init .................. event listeners and startup behavior
+
+  The safest places to edit are comments, default G-code, CSS tokens,
+  button labels and report text. Be careful inside loadAndDraw()
+  because it contains most of the parser/checker logic.
+*/
+
+/* ---------- Global state ----------
+   These variables hold the current tool table, parsed program, playback
+   position, and display state. They are reset each time Load & Draw runs.
+---------- */
+
+let toolTable = {};
+let stockBounds = null;
+let clearanceZ = null;
+
+const machine = {
+  x: 0, y: 0, z: 0,
+  motion: 'G0',
+  dist: 'G90',
+  cutterComp: 'G40',
+  cycle: null,
+  tool: 1,
+  spindle: 0,
+  feed: 0
+};
+
+let moves = [];
+let drillPoints = [];
+let modalSnapshots = [];
+let pauseMarkers = [];
+let errors = [];
+let toolStats = {};
+
+const view = { zoom: 1, offsetX: 0, offsetY: 0 };
+
+let playIndex = -1;
+let isPlaying = false;
+let playTimer = null;
+let pauseOnM0 = true;
+let pauseOnM1 = true;
+let loopPlayback = false;
+
+const baseInterval = 140;
+let speedFactor = 1.0;
+
+/* ---------- Tool & stock helpers ----------
+   These functions read the Stock & Tools panel and auto-add tool rows
+   when T-codes are found in the program.
+---------- */
+
+function ensureToolRowsForProgram(programText) {
+  const toolNums = new Set();
+  const tRegex = /T(\d+)/gi;
+  let m;
+  while ((m = tRegex.exec(programText)) !== null) {
+    const t = parseInt(m[1], 10);
+    if (Number.isFinite(t)) toolNums.add(t);
+  }
+  if (!toolNums.size) return;
+
+  const tbody = document.getElementById('toolTableBody');
+  if (!tbody) return;
+
+  const existing = new Set();
+  tbody.querySelectorAll('.tool-row').forEach(row => {
+    const nEl = row.querySelector('.tool-num');
+    if (!nEl) return;
+    const v = parseInt(nEl.value,10);
+    if (Number.isFinite(v)) existing.add(v);
+  });
+
+  const palette = ['#00ffff','#ff00ff','#ffaa00','#22c55e','#38bdf8','#e879f9','#f97316','#ef4444','#eab308'];
+  let idx = 0;
+
+  toolNums.forEach(t => {
+    if (existing.has(t)) return;
+    const row = document.createElement('tr');
+    row.className = 'tool-row';
+    const color = palette[idx % palette.length]; idx++;
+    row.innerHTML = `
+      <td><input type="number" min="1" step="1" class="tool-num" value="${t}"></td>
+      <td><input type="number" min="0" step="0.001" class="tool-dia"></td>
+      <td><input type="color" class="tool-color" value="${color}"></td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+function parseToolTable() {
+  const rows = document.querySelectorAll('#toolTableBody .tool-row');
+  const table = {};
+  rows.forEach(row => {
+    const numEl = row.querySelector('.tool-num');
+    const diaEl = row.querySelector('.tool-dia');
+    const colEl = row.querySelector('.tool-color');
+    if (!numEl || !diaEl || !colEl) return;
+    const tNum = parseInt(numEl.value,10);
+    const dia = parseFloat(diaEl.value);
+    const color = colEl.value || '#00ffff';
+    if (!Number.isFinite(tNum)) return;
+    if (!Number.isFinite(dia) || dia <= 0) return;
+    table[tNum] = { diameter: dia, color };
+  });
+  return table;
+}
+function addToolRow() {
+  const tbody = document.getElementById('toolTableBody');
+  if (!tbody) return;
+  const row = document.createElement('tr');
+  row.className = 'tool-row';
+  row.innerHTML = `
+    <td><input type="number" min="1" step="1" class="tool-num"></td>
+    <td><input type="number" min="0" step="0.001" class="tool-dia"></td>
+    <td><input type="color" value="#00ffff" class="tool-color"></td>
+  `;
+  tbody.appendChild(row);
+}
+function getToolInfo(t) {
+  const entry = toolTable[t];
+  if (entry) return entry;
+  return { diameter: 0.25, color: '#00ffff' };
+}
+
+function parseStockSettings() {
+  const minX = parseFloat(document.getElementById('stockMinX').value);
+  const maxX = parseFloat(document.getElementById('stockMaxX').value);
+  const minY = parseFloat(document.getElementById('stockMinY').value);
+  const maxY = parseFloat(document.getElementById('stockMaxY').value);
+  const cz   = parseFloat(document.getElementById('clearanceZ').value);
+
+  if (Number.isFinite(minX) && Number.isFinite(maxX) &&
+      Number.isFinite(minY) && Number.isFinite(maxY) &&
+      maxX > minX && maxY > minY) {
+    stockBounds = {minX,maxX,minY,maxY};
+  } else {
+    stockBounds = null;
+  }
+
+  clearanceZ = Number.isFinite(cz) ? cz : null;
+}
+
+/* ---------- Parsing ----------
+   parseWords() strips comments and converts a G-code block into address
+   words like G, X, Y, Z, F, S, T, H, and D.
+---------- */
+
+function parseWords(line) {
+  let s = line.split(';')[0];
+  s = s.replace(/\(.*?\)/g, '');
+  s = s.trim();
+  let words = [];
+  let i = 0;
+  while (i < s.length) {
+    let c = s[i].toUpperCase();
+    if (c >= 'A' && c <= 'Z') {
+      const letter = c;
+      i++;
+      const start = i;
+      while (i < s.length) {
+        const ch = s[i];
+        const up = ch.toUpperCase();
+        if (up >= 'A' && up <= 'Z') break;
+        i++;
+      }
+      const val = s.substring(start, i).trim();
+      if (val.length) words.push({letter, value: val});
+    } else {
+      i++;
+    }
+  }
+  return words;
+}
+
+function addToolLength(tool, len) {
+  if (!toolStats[tool]) toolStats[tool] = { len2D: 0 };
+  toolStats[tool].len2D += len;
+}
+
+
+/* ---------- Haas / MACT checker helpers ----------
+   These constants and helper functions support the local grading checker.
+   Add or remove G/M codes here only when you want to change checker rules.
+---------- */
+
+const CANNED_CYCLE_NUMS = new Set([73,74,76,77,81,82,83,84,85,86,87,88,89]);
+const KNOWN_M_NUMS = new Set([0,1,2,3,4,5,6,8,9,10,11,12,13,16,17,18,19,30,31,33,34,35,36,39,41,42,50,59,69,75,76,77,78,79,80,81,82,83,84,86,88,89,93,94,95,96,97,98,99,101,102,103,109]);
+const COMMON_G_NUMS = new Set([0,1,2,3,4,9,10,12,13,17,18,19,20,21,28,29,31,35,36,37,40,41,42,43,44,47,49,50,51,52,53,54,55,56,57,58,59,60,61,64,65,68,69,70,71,72,73,74,76,77,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,98,99,100,101,102,103,107,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,136,141,143,150,153,154,155,161,162,163,164,165,166,169,174,184,187,188]);
+const G_GROUPS_MACT = new Map([
+  [0,1],[1,1],[2,1],[3,1],
+  [17,2],[18,2],[19,2],
+  [90,3],[91,3],
+  [93,5],[94,5],[95,5],
+  [20,6],[21,6],
+  [40,7],[41,7],[42,7],[141,7],
+  [43,8],[44,8],[49,8],[143,8],
+  [73,9],[74,9],[76,9],[77,9],[80,9],[81,9],[82,9],[83,9],[84,9],[85,9],[86,9],[87,9],[88,9],[89,9],[153,9],[155,9],[161,9],[162,9],[163,9],[164,9],[165,9],[166,9],[169,9],
+  [98,10],[99,10],
+  [50,11],[51,11],
+  [54,12],[55,12],[56,12],[57,12],[58,12],[59,12],[110,12],[111,12],[112,12],[113,12],[114,12],[115,12],[116,12],[117,12],[118,12],[119,12],[120,12],[121,12],[122,12],[123,12],[124,12],[125,12],[126,12],[127,12],[128,12],[129,12],
+  [61,13],[64,13],
+  [68,16],[69,16]
+]);
+
+function normCodeNumber(value){
+  const n = parseInt(String(value).replace(/^0+/, '') || '0', 10);
+  return Number.isFinite(n) ? n : null;
+}
+function fmtG(n){ return 'G' + (n < 100 ? String(n).padStart(2,'0') : String(n)); }
+function fmtM(n){ return 'M' + (n < 10 ? String(n).padStart(2,'0') : String(n)); }
+function wordsFor(words, letter){ return words.filter(w => w.letter === letter); }
+function numericValues(words, letter){ return wordsFor(words,letter).map(w => parseFloat(w.value)).filter(Number.isFinite); }
+function intValues(words, letter){ return wordsFor(words,letter).map(w => normCodeNumber(w.value)).filter(Number.isFinite); }
+function lastNumeric(words, letter){ const vals=numericValues(words,letter); return vals.length ? vals[vals.length-1] : null; }
+function lastInt(words, letter){ const vals=intValues(words,letter); return vals.length ? vals[vals.length-1] : null; }
+function hasWordLetter(words, letter){ return words.some(w => w.letter === letter); }
+function hasGNum(words, n){ return intValues(words,'G').includes(n); }
+function hasMNum(words, n){ return intValues(words,'M').includes(n); }
+function hasAnyXY(words){ return hasWordLetter(words,'X') || hasWordLetter(words,'Y'); }
+function hasAnyAxis(words){ return ['X','Y','Z','A','B'].some(l => hasWordLetter(words,l)); }
+function issueLine(lineLabel, li){ return lineLabel ? `N${lineLabel}` : `L${li+1}`; }
+function addCheckerIssue(line, severity, msg, suggestion, moveIndex=null){
+  errors.push({ line, severity: severity || 'warning', msg, suggestion: suggestion || '', moveIndex });
+}
+function mactStopPattern(text){
+  return /invalid|missing|cannot|must|mismatch|unsafe|crash|below zero|G41|G42|R-plane|R plane|Q peck|P dwell|tool length|spindle|rapid/i.test(String(text || ''));
+}
+
+/*
+  Main parser/checker entry point.
+  1. Reads the textarea.
+  2. Parses each line.
+  3. Builds moves/drill points.
+  4. Flags local checker issues.
+  5. Redraws the canvas.
+*/
+function loadAndDraw() {
+  const progEl = document.getElementById('program');
+  if (!progEl) return;
+  const text = progEl.value;
+  const lines = text.split('\n');
+
+  ensureToolRowsForProgram(text);
+  toolTable = parseToolTable();
+  parseStockSettings();
+  updateSetupSummary();
+
+  machine.x = 0;
+  machine.y = 0;
+  machine.z = 0;
+  machine.motion = 'G0';
+  machine.dist   = 'G90';
+  machine.cutterComp = 'G40';
+  machine.cycle  = null;
+  machine.tool   = 1;
+  machine.pendingTool = null;
+  machine.spindle= 0;
+  machine.feed   = 0;
+  machine.returnPlane = 'G98';
+  machine.units = 'G20';
+  machine.plane = 'G17';
+  machine.workOffset = 'G54';
+  machine.lengthComp = 'G49';
+  machine.coolant = false;
+
+  moves = [];
+  drillPoints = [];
+  modalSnapshots = [];
+  pauseMarkers = [];
+  errors = [];
+  toolStats = {};
+  isPlaying = false;
+  playIndex = -1;
+  if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+
+  const upperText = text.toUpperCase();
+  const codeBlocksForProgramChecks = lines.map((line, idx) => ({line, idx, words:parseWords(line)})).filter(b => b.words.length && !/^\s*%\s*$/.test(b.line.trim()));
+  const firstCodeBlock = codeBlocksForProgramChecks[0];
+  if (!/^\s*%/.test(text.trim())) {
+    addCheckerIssue('Program', 'warning', 'Program does not begin with %', 'For transfer/storage format, start and end the program with a percent sign.');
+  }
+  if (!/%\s*$/.test(text.trim())) {
+    addCheckerIssue('Program', 'warning', 'Program does not end with %', 'For transfer/storage format, end the program with a percent sign.');
+  }
+  if (firstCodeBlock && !hasWordLetter(firstCodeBlock.words, 'O')) {
+    addCheckerIssue(`L${firstCodeBlock.idx+1}`, 'warning', 'Program number is not the first code block', 'Class/Haas format normally places an O-number near the top of the program.');
+  }
+  if (!/\bO\s*\d+/i.test(text)) {
+    addCheckerIssue('Program', 'warning', 'No O-number found', 'Add a program number such as O01234.');
+  }
+  if (!/\bM\s*0?30\b|\bM\s*0?2\b/i.test(text)) {
+    addCheckerIssue('Program', 'error', 'No program end command found', 'End the main program with M30.');
+  }
+
+  let activeCannedCycle = null;
+  let lastExplicitZ = null;
+  let g91FromG28 = false;
+  const toolChangeRecords = [];
+
+  for (let li = 0; li < lines.length; li++) {
+    const rawLine = lines[li];
+    const trimmedLine = rawLine.trim();
+    if (!trimmedLine.length || /^%\s*$/.test(trimmedLine)) continue;
+    const words = parseWords(rawLine);
+    if (!words.length) continue;
+
+    let lineLabelRaw = null;
+    for (const w of words) {
+      if (w.letter === 'N') { lineLabelRaw = w.value; break; }
+    }
+    const thisLineLabel = issueLine(lineLabelRaw, li);
+
+    const gNums = intValues(words,'G');
+    const mNums = intValues(words,'M');
+    const xVal = lastNumeric(words,'X');
+    const yVal = lastNumeric(words,'Y');
+    const zVal = lastNumeric(words,'Z');
+    const iValRaw = lastNumeric(words,'I');
+    const jValRaw = lastNumeric(words,'J');
+    const rVal = lastNumeric(words,'R');
+    const pVal = lastNumeric(words,'P');
+    const qVal = lastNumeric(words,'Q');
+    const hVal = lastInt(words,'H');
+    const dVal = lastInt(words,'D');
+    const tVal = lastInt(words,'T');
+    const sVal = lastNumeric(words,'S');
+    const fVal = lastNumeric(words,'F');
+
+    const hasX = hasWordLetter(words,'X');
+    const hasY = hasWordLetter(words,'Y');
+    const hasZ = hasWordLetter(words,'Z');
+    const hasI = hasWordLetter(words,'I');
+    const hasJ = hasWordLetter(words,'J');
+    const hasR = hasWordLetter(words,'R');
+    const hasP = hasWordLetter(words,'P');
+    const hasQ = hasWordLetter(words,'Q');
+    const hasF = hasWordLetter(words,'F');
+    const hasD = hasWordLetter(words,'D');
+    const hasH = hasWordLetter(words,'H');
+    const hasG0 = hasGNum(words,0);
+    const hasG1 = hasGNum(words,1);
+    const hasG2 = hasGNum(words,2);
+    const hasG3 = hasGNum(words,3);
+    const hasG40 = hasGNum(words,40);
+    const hasG41 = hasGNum(words,41);
+    const hasG42 = hasGNum(words,42);
+    const hasG43 = hasGNum(words,43);
+    const hasG49 = hasGNum(words,49);
+    const hasG80 = hasGNum(words,80);
+    const hasG90 = hasGNum(words,90);
+    const hasG91 = hasGNum(words,91);
+    const hasG98 = hasGNum(words,98);
+    const hasG99 = hasGNum(words,99);
+    const hasM0 = mNums.includes(0);
+    const hasM1 = mNums.includes(1);
+    const hasM3 = mNums.includes(3);
+    const hasM4 = mNums.includes(4);
+    const hasM5 = mNums.includes(5);
+    const hasM6 = mNums.includes(6);
+    const hasM8 = mNums.includes(8);
+    const hasM9 = mNums.includes(9);
+    const hasM30 = mNums.includes(30) || mNums.includes(2);
+    const cannedHereNum = gNums.find(g => CANNED_CYCLE_NUMS.has(g));
+
+    // Duplicated address letters that usually indicate a typo.
+    const addressCounts = new Map();
+    for (const w of words) addressCounts.set(w.letter, (addressCounts.get(w.letter) || 0) + 1);
+    for (const [letter, count] of addressCounts.entries()) {
+      if (count > 1 && !['G','M'].includes(letter)) {
+        addCheckerIssue(thisLineLabel, 'warning', `Repeated ${letter} word`, `This block contains ${count} ${letter}-words. Keep only the intended value.`);
+      }
+    }
+
+    // Haas modal group conflicts and uncommon code notes.
+    const seenGroups = new Map();
+    for (const g of gNums) {
+      if (!COMMON_G_NUMS.has(g)) {
+        addCheckerIssue(thisLineLabel, 'info', `Unknown or uncommon ${fmtG(g)}`, 'Verify this code against the exact Haas control/version.');
+      }
+      const group = G_GROUPS_MACT.get(g);
+      if (group && group !== 0) {
+        if (seenGroups.has(group)) {
+          addCheckerIssue(thisLineLabel, 'error', 'Two modal G-codes from the same group', `${fmtG(seenGroups.get(group))} and ${fmtG(g)} are both Group ${String(group).padStart(2,'0')} codes. Split the commands or remove the unintended modal code.`);
+        } else {
+          seenGroups.set(group, g);
+        }
+      }
+    }
+
+    if (mNums.length > 1) {
+      addCheckerIssue(thisLineLabel, 'error', 'More than one M-code in one block', `This block contains ${mNums.map(fmtM).join(', ')}. Haas class format allows only one M-code per block.`);
+    }
+    for (const m of mNums) {
+      const isRangeCode = (m >= 21 && m <= 28) || (m >= 51 && m <= 58) || (m >= 61 && m <= 68);
+      if (!KNOWN_M_NUMS.has(m) && !isRangeCode) {
+        addCheckerIssue(thisLineLabel, 'info', `Unknown or uncommon ${fmtM(m)}`, 'Verify this M-code against the exact Haas control/version.');
+      }
+    }
+    if ((hasM3 || hasM4) && !Number.isFinite(sVal) && !Number.isFinite(machine.spindle)) {
+      addCheckerIssue(thisLineLabel, 'error', 'Spindle starts without a known S value', 'Program S#### before or on the spindle start line.');
+    }
+
+    // Pending tool and tool change handling.
+    if (Number.isFinite(tVal)) {
+      machine.pendingTool = tVal;
+      machine.tool = tVal;
+    }
+    if (hasM6) {
+      activeCannedCycle = null;
+      machine.cycle = null;
+      lastExplicitZ = null;
+      const selectedTool = Number.isFinite(tVal) ? tVal : machine.pendingTool;
+      if (!Number.isFinite(selectedTool)) {
+        addCheckerIssue(thisLineLabel, 'error', 'M06 without a selected tool', 'Use T# M06 or select the T-number before M06.');
+      } else {
+        machine.tool = selectedTool;
+        machine.pendingTool = selectedTool;
+        toolChangeRecords.push({ lineIndex: li, line: thisLineLabel, tool: selectedTool });
+      }
+      if (machine.cutterComp !== 'G40') {
+        addCheckerIssue(thisLineLabel, 'error', 'Tool change while cutter compensation is still active', 'Cancel G41/G42 with G40 on a proper lead-out move before changing tools.');
+      }
+    }
+
+    // Modal updates needed before target math.
+    const compBefore = machine.cutterComp;
+    for (const g of gNums) {
+      if (g === 0) machine.motion = 'G0';
+      else if (g === 1) machine.motion = 'G1';
+      else if (g === 2) machine.motion = 'G2';
+      else if (g === 3) machine.motion = 'G3';
+      else if (g === 17 || g === 18 || g === 19) machine.plane = fmtG(g);
+      else if (g === 20 || g === 21) machine.units = fmtG(g);
+      else if (g === 40 || g === 41 || g === 42) machine.cutterComp = fmtG(g);
+      else if (g === 43 || g === 44 || g === 49) machine.lengthComp = fmtG(g);
+      else if (g === 54 || g === 55 || g === 56 || g === 57 || g === 58 || g === 59 || (g >= 110 && g <= 129)) machine.workOffset = fmtG(g);
+      else if (g === 80) machine.cycle = null;
+      else if (CANNED_CYCLE_NUMS.has(g)) machine.cycle = fmtG(g);
+      else if (g === 90 || g === 91) machine.dist = fmtG(g);
+      else if (g === 98 || g === 99) machine.returnPlane = fmtG(g);
+    }
+
+    if (Number.isFinite(sVal)) machine.spindle = sVal;
+    if (Number.isFinite(fVal)) machine.feed = fVal;
+    if (hasM8) machine.coolant = true;
+    if (hasM9) machine.coolant = false;
+    if (hasM5 || hasM30) machine.coolant = false;
+
+    // G28 / G91 discipline.
+    if (gNums.includes(28)) {
+      g91FromG28 = machine.dist === 'G91' || hasG91;
+      if (!hasG91) {
+        addCheckerIssue(thisLineLabel, 'warning', 'G28 is not paired with G91 on the same block', 'Class Haas format commonly uses G28 G91 Z0 or G28 G91 Y0 Z0 to avoid accidental absolute positioning through part zero.');
+      }
+    } else if (g91FromG28 && machine.dist === 'G91' && !hasG91 && hasAnyAxis(words)) {
+      addCheckerIssue(thisLineLabel, 'error', 'Program is still in G91 after G28', 'Add G90 at the next startup/positioning line before regular coordinates.');
+      g91FromG28 = false;
+    }
+    if (hasG90) g91FromG28 = false;
+
+    // Tool length compensation: class format expects G43 H# Z(clearance) together and H matching the active tool.
+    if (hasG43) {
+      if (!hasH || !Number.isFinite(hVal)) {
+        addCheckerIssue(thisLineLabel, 'error', 'G43 without H offset', 'Use G43 H## Z(clearance).');
+      } else if (Number.isFinite(machine.tool) && hVal !== machine.tool) {
+        addCheckerIssue(thisLineLabel, 'error', 'H offset does not match active tool number', `Active tool appears to be T${machine.tool}, but this line uses H${hVal}. Keep T and H matched for class format.`);
+      }
+      if (!hasZ) {
+        addCheckerIssue(thisLineLabel, 'warning', 'G43 without a Z clearance position', 'Put H on the same G43 startup line as the safe Z move, for example G00 Z1.0 H## G43.');
+      }
+    } else if (hasH && !hasG43 && !hasG49) {
+      addCheckerIssue(thisLineLabel, 'warning', 'H offset appears away from the G43 startup line', 'Class format expects H on the same line as G43 and a safe Z move.');
+    }
+
+    // Cutter compensation: D on same block, explicit G01, X/Y lead-in, and D matching active tool for class format.
+    if (hasG41 || hasG42) {
+      const compCode = hasG41 ? 'G41' : 'G42';
+      if (!hasD || !Number.isFinite(dVal) || dVal === 0) {
+        addCheckerIssue(thisLineLabel, 'error', `${compCode} without a valid D offset`, 'Add D## on the same block as G41/G42. For class format, D should match the active tool number.');
+      } else if (Number.isFinite(machine.tool) && dVal !== machine.tool) {
+        addCheckerIssue(thisLineLabel, 'error', 'D offset does not match active tool number', `Active tool appears to be T${machine.tool}, but cutter comp uses D${dVal}. Keep T, H, and D matched unless there is a clear reason not to.`);
+      }
+      if (!hasG1) {
+        addCheckerIssue(thisLineLabel, 'error', `${compCode} is not on an explicit G01 line`, 'Use G01 G41/G42 D## with an X and/or Y lead-in move on the same block.');
+      }
+      if (!hasAnyXY(words)) {
+        addCheckerIssue(thisLineLabel, 'warning', `${compCode} has no X/Y lead-in motion`, 'Cutter compensation should be activated while making a controlled lead-in move, not while sitting still.');
+      }
+      if (!hasF && !Number.isFinite(machine.feed)) {
+        addCheckerIssue(thisLineLabel, 'warning', `${compCode} lead-in has no known feedrate`, 'Add F on or before the lead-in move.');
+      }
+    }
+    if (hasG40 && compBefore !== 'G40' && !hasAnyXY(words)) {
+      addCheckerIssue(thisLineLabel, 'info', 'G40 cancel has no X/Y lead-out motion', 'G40 is safest and clearest when canceling cutter compensation while moving away from the finished edge.');
+    }
+
+    // Canned cycle intelligence: initial plane, R plane, G98/G99, and required cycle words.
+    if (cannedHereNum) {
+      const cycleText = fmtG(cannedHereNum);
+      const initialPlaneZ = machine.z;
+      const initialPlaneLine = lastExplicitZ ? lastExplicitZ.line : null;
+      const retractMode = hasG98 ? 98 : hasG99 ? 99 : (machine.returnPlane === 'G99' ? 99 : 98);
+      const actualR = Number.isFinite(rVal) ? (machine.dist === 'G91' ? initialPlaneZ + rVal : rVal) : null;
+      const bottomZ = Number.isFinite(zVal)
+        ? (machine.dist === 'G91'
+          ? (Number.isFinite(actualR) ? actualR + zVal : initialPlaneZ + zVal)
+          : zVal)
+        : null;
+
+      if (!lastExplicitZ) {
+        addCheckerIssue(thisLineLabel, 'error', 'No explicit Initial Clearance Plane before canned cycle', 'The Initial Clearance Plane is the last Z position before the canned cycle starts. Add a safe line such as G00 Z1.0 or G43 H## Z1.0 before the cycle.');
+      } else if (Number.isFinite(initialPlaneZ) && initialPlaneZ < 0.05) {
+        addCheckerIssue(thisLineLabel, 'warning', 'Initial Clearance Plane may be too low', `The last Z move before this cycle was ${initialPlaneLine}, leaving the tool at Z${initialPlaneZ.toFixed(4)} before the cycle starts.`);
+      }
+
+      if (!hasZ || !Number.isFinite(zVal)) {
+        addCheckerIssue(thisLineLabel, 'error', `${cycleText} is missing Z depth`, 'Add the Z depth/bottom value on the canned cycle startup line.');
+      }
+      if (!hasR || !Number.isFinite(rVal)) {
+        addCheckerIssue(thisLineLabel, 'error', `${cycleText} is missing an R plane`, 'Add an R plane for the canned cycle. In G90, R is absolute. In G91, R is relative to the Initial Clearance Plane.');
+      } else {
+        const modeText = machine.dist === 'G91'
+          ? `G91 incremental: R${rVal} from Initial Plane Z${initialPlaneZ.toFixed(4)} gives actual R Z${actualR.toFixed(4)}.`
+          : `G90 absolute: R${rVal} gives actual R Z${actualR.toFixed(4)}.`;
+        if (machine.dist === 'G90' && actualR < 0) {
+          addCheckerIssue(thisLineLabel, 'error', 'Canned cycle R-plane is below part zero', `${modeText} The tool may rapid into raw stock before feeding. Use a positive R plane such as R0.1 unless the setup proves otherwise.`);
+        } else if (actualR < 0.05) {
+          addCheckerIssue(thisLineLabel, 'warning', 'Canned cycle R-plane is very low', `${modeText} R planes around Z0.05 or lower leave little chip/material clearance.`);
+        }
+        if (Number.isFinite(bottomZ) && actualR <= bottomZ + 0.000001) {
+          addCheckerIssue(thisLineLabel, 'error', 'Canned cycle R-plane is not above the cutting depth', `Computed R plane is Z${actualR.toFixed(4)} and programmed bottom is approximately Z${bottomZ.toFixed(4)}. Set R above the cutting depth and above the part surface.`);
+        }
+        if (retractMode === 99 && Number.isFinite(initialPlaneZ) && actualR >= initialPlaneZ - 0.000001) {
+          addCheckerIssue(thisLineLabel, 'warning', 'G99 R-plane is not below the Initial Clearance Plane', `G99 will retract to R plane Z${actualR.toFixed(4)}, but the Initial Clearance Plane is Z${initialPlaneZ.toFixed(4)}. Normally the Initial Plane is higher than R.`);
+        }
+        if (retractMode === 98 && Number.isFinite(initialPlaneZ) && actualR >= initialPlaneZ - 0.000001) {
+          addCheckerIssue(thisLineLabel, 'warning', 'G98 does not add clearance above the R plane', `G98 should return to the Initial Clearance Plane, but Initial Z${initialPlaneZ.toFixed(4)} is not above R Z${actualR.toFixed(4)}. Raise the tool before starting the cycle if obstacle clearance is needed.`);
+        }
+      }
+      if (!hasF && !Number.isFinite(machine.feed)) {
+        addCheckerIssue(thisLineLabel, 'warning', `${cycleText} has no known feedrate`, 'Add F on or before the canned cycle startup line.');
+      }
+      if ((cannedHereNum === 83 || cannedHereNum === 73) && (!hasQ || !Number.isFinite(qVal) || qVal <= 0)) {
+        addCheckerIssue(thisLineLabel, 'error', `${cycleText} is missing a valid Q peck value`, 'Add a positive Q value for peck depth.');
+      }
+      if (cannedHereNum === 82 && !hasP) {
+        addCheckerIssue(thisLineLabel, 'info', 'G82 has no P dwell value', 'Spot drill/counterbore cycles often include a short dwell. Add P dwell time if the operation requires it.');
+      }
+      if (!hasAnyXY(words)) {
+        addCheckerIssue(thisLineLabel, 'info', 'Canned cycle startup has no X/Y location', 'For clarity, include the first X/Y hole location on the cycle startup line.');
+      }
+      if (retractMode === 99) {
+        addCheckerIssue(thisLineLabel, 'info', 'G99 retract mode active', 'G99 retracts only to the R Plane between holes. Use it only when the path between holes is flat and clear. Use G98 to clear clamps, vise jaws, steps, or fixtures.');
+      }
+
+      activeCannedCycle = {
+        code: cycleText,
+        initialPlaneZ,
+        initialPlaneLine,
+        rPlaneZ: actualR,
+        bottomZ,
+        retractMode
+      };
+      machine.cycle = cycleText;
+    } else if (activeCannedCycle && machine.cycle && !hasG80) {
+      if (hasG98 || hasG99) {
+        const newMode = hasG98 ? 98 : 99;
+        activeCannedCycle.retractMode = newMode;
+        machine.returnPlane = fmtG(newMode);
+        addCheckerIssue(thisLineLabel, 'info', `${fmtG(newMode)} retract mode switch during active canned cycle`, newMode === 98 ? 'Use G98 to clear clamps or raised features between holes.' : 'Use G99 only when the move to the next hole is flat and clear.');
+      }
+      if ((hasG99 || activeCannedCycle.retractMode === 99) && Number.isFinite(activeCannedCycle.rPlaneZ) && activeCannedCycle.rPlaneZ < 0.05) {
+        addCheckerIssue(thisLineLabel, 'warning', 'G99 uses a very low R plane on this hole move', `The active R plane is Z${activeCannedCycle.rPlaneZ.toFixed(4)}. Use G98 for obstacle clearance or raise the R plane.`);
+      }
+    }
+    if (hasG80) {
+      activeCannedCycle = null;
+      machine.cycle = null;
+    }
+    if (activeCannedCycle && (hasG0 || hasG1) && !hasG80 && !cannedHereNum) {
+      addCheckerIssue(thisLineLabel, 'info', 'G00/G01 cancels active canned cycle', 'On Haas, Group 01 G00/G01 cancels Group 09 canned cycles. This works, but G80 is clearer for students.');
+      activeCannedCycle = null;
+      machine.cycle = null;
+    }
+    if (hasM30 && machine.cycle) {
+      addCheckerIssue(thisLineLabel, 'error', 'Program ends with canned cycle still active', 'Add G80 before M30.');
+    }
+
+    // Target math.
+    let tx = machine.x, ty = machine.y, tz = machine.z;
+    if (hasX && Number.isFinite(xVal)) tx = (machine.dist === 'G90') ? xVal : machine.x + xVal;
+    if (hasY && Number.isFinite(yVal)) ty = (machine.dist === 'G90') ? yVal : machine.y + yVal;
+    if (hasZ && Number.isFinite(zVal)) tz = (machine.dist === 'G90') ? zVal : machine.z + zVal;
+
+    const isCannedPoint = !!(activeCannedCycle && machine.cycle && (cannedHereNum || hasX || hasY));
+    if (isCannedPoint) {
+      // Plot the XY travel between holes at the current retract height, then mark the hole.
+      const returnZ = activeCannedCycle.retractMode === 98 ? activeCannedCycle.initialPlaneZ : activeCannedCycle.rPlaneZ;
+      const targetZForMove = Number.isFinite(returnZ) ? returnZ : machine.z;
+      const xyChanged = (tx !== machine.x) || (ty !== machine.y);
+      if (xyChanged) {
+        const moveIndex = moves.length;
+        const rapidMove = {
+          type: 'G0', fromX: machine.x, fromY: machine.y, fromZ: machine.z,
+          toX: tx, toY: ty, toZ: targetZForMove,
+          isArc:false, i:0, j:0, radius:null,
+          compMode: machine.cutterComp, tool: machine.tool, feed: machine.feed,
+          spindle: machine.spindle, lineLabel: thisLineLabel, lineIndex: li,
+          length2D: Math.hypot(tx-machine.x, ty-machine.y), bad:false, outsideStock:false,
+          canned:true
+        };
+        moves.push(rapidMove);
+        modalSnapshots.push({
+          motion: 'G0', dist: machine.dist, cutterComp: machine.cutterComp,
+          cycle: machine.cycle || 'G80', tool: machine.tool, spindle: machine.spindle || 0, feed: machine.feed || 0
+        });
+        addToolLength(machine.tool, rapidMove.length2D);
+        if (hasM0) pauseMarkers.push({index:moveIndex, type:'M0'});
+        if (hasM1) pauseMarkers.push({index:moveIndex, type:'M1'});
+      }
+      const drillIndex = Math.max(0, moves.length-1);
+      drillPoints.push({ x: tx, y: ty, z: Number.isFinite(activeCannedCycle.bottomZ) ? activeCannedCycle.bottomZ : tz, tool: machine.tool, index: drillIndex, cycle: machine.cycle });
+      machine.x = tx;
+      machine.y = ty;
+      machine.z = targetZForMove;
+    } else {
+      let isMotion = (tx !== machine.x) || (ty !== machine.y) || (tz !== machine.z);
+      if ((machine.motion === 'G2' || machine.motion === 'G3') && !isMotion && (hasI || hasJ)) {
+        isMotion = true; // full circle with same start/end
+      }
+
+      if (machine.motion === 'G0' && hasAnyXY(words) && machine.z < -0.0001) {
+        addCheckerIssue(thisLineLabel, 'error', 'Rapid XY move while Z is below zero', `The tool appears to rapid in X/Y at Z${machine.z.toFixed(4)}. Retract to a safe Z clearance before rapid XY positioning.`);
+      }
+      if (machine.motion === 'G0' && hasZ && tz < -0.01 && hasAnyXY(words)) {
+        addCheckerIssue(thisLineLabel, 'warning', 'Rapid includes XY and a negative Z move together', 'Rapid moves do not guarantee a safe straight-line path around clamps or stock. Separate XY positioning from Z approach.');
+      }
+      if ((machine.motion === 'G1' || machine.motion === 'G2' || machine.motion === 'G3') && !Number.isFinite(machine.feed)) {
+        addCheckerIssue(thisLineLabel, 'warning', 'Cutting move without a known feedrate', 'Add F feedrate before or on the first cutting move.');
+      }
+
+      if (isMotion) {
+        const moveIndex = moves.length;
+        const move = {
+          type: machine.motion,
+          fromX: machine.x,
+          fromY: machine.y,
+          fromZ: machine.z,
+          toX:   tx,
+          toY:   ty,
+          toZ:   tz,
+          isArc: (machine.motion === 'G2' || machine.motion === 'G3'),
+          i: 0,
+          j: 0,
+          radius: null,
+          compMode: machine.cutterComp,
+          tool: machine.tool,
+          feed: machine.feed,
+          spindle: machine.spindle,
+          lineLabel: thisLineLabel,
+          lineIndex: li,
+          length2D: 0,
+          bad: false,
+          outsideStock: false
+        };
+
+        const dx = tx - machine.x;
+        const dy = ty - machine.y;
+        const dist2D = Math.hypot(dx,dy);
+        move.length2D = dist2D;
+        addToolLength(machine.tool, dist2D);
+
+        if (move.isArc) {
+          if (machine.plane !== 'G17') {
+            move.bad = true;
+            addCheckerIssue(thisLineLabel, 'warning', 'Arc is not in the G17 XY plane', 'This visualizer primarily backplots G17 XY arcs. Verify G18/G19 arcs at the machine or in CAM/backplot software.', moveIndex);
+          }
+          const iVal = Number.isFinite(iValRaw) ? iValRaw : 0;
+          const jVal = Number.isFinite(jValRaw) ? jValRaw : 0;
+          move.i = iVal;
+          move.j = jVal;
+
+          const cx = machine.x + iVal;
+          const cy = machine.y + jVal;
+          const rStart = Math.hypot(machine.x - cx, machine.y - cy);
+          const rEnd   = Math.hypot(tx - cx,       ty - cy);
+          move.radius = rStart;
+
+          if (hasR && (hasI || hasJ)) {
+            addCheckerIssue(thisLineLabel, 'warning', 'Arc uses both R and I/J', 'Use either R or I/J for an arc, not both, unless you have a specific control-supported reason.');
+          }
+          if (!hasR && !hasI && !hasJ) {
+            move.bad = true;
+            addCheckerIssue(thisLineLabel, 'error', 'Arc missing R or I/J data', 'G02/G03 needs an R value or I/J center offsets.', moveIndex);
+          } else if ((hasI || hasJ) && rStart === 0 && rEnd === 0) {
+            move.bad = true;
+            addCheckerIssue(thisLineLabel, 'error', 'Arc center coincides with start and end point', 'Check I/J offsets; the center should not be at the same point as the tool.', moveIndex);
+          } else if ((hasI || hasJ) && Math.abs(rStart - rEnd) > 0.001) {
+            move.bad = true;
+            addCheckerIssue(thisLineLabel, 'error', `Arc radius mismatch`, `Start radius is ${rStart.toFixed(4)} and end radius is ${rEnd.toFixed(4)}. Recalculate I/J so they match.`, moveIndex);
+          }
+        }
+
+        if ((machine.cutterComp === 'G41' || machine.cutterComp === 'G42') && dist2D < 0.0005 && !move.isArc) {
+          move.bad = true;
+          addCheckerIssue(thisLineLabel, 'warning', 'Very short move with G41/G42 active', 'Use a longer lead-in, about one tool radius or more, before turning onto the contour.', moveIndex);
+        }
+
+        if (stockBounds && (move.type === 'G1' || move.isArc)) {
+          const {minX,maxX,minY,maxY} = stockBounds;
+          const outside =
+            (move.fromX < minX || move.fromX > maxX ||
+             move.fromY < minY || move.fromY > maxY ||
+             move.toX   < minX || move.toX   > maxX ||
+             move.toY   < minY || move.toY   > maxY);
+          if (outside) move.outsideStock = true;
+        }
+
+        if (move.type === 'G1' && dist2D > 0.0001 && move.feed > 0) {
+          const tInfo = getToolInfo(move.tool);
+          const d = tInfo.diameter;
+          const F = move.feed;
+          let warn = false, suggestion = '';
+          if (d <= 0.125 && F > 60) {
+            warn = true; suggestion = 'For tools at or below 0.125 in, check chip load and consider reducing feed.';
+          } else if (d <= 0.25 && F > 120) {
+            warn = true; suggestion = 'Feed may be aggressive for a 1/4 in tool; verify chip load and workholding.';
+          } else if (d <= 0.375 && F > 200) {
+            warn = true; suggestion = 'Feed seems high for a 3/8 in tool; double-check feeds and speeds.';
+          }
+          if (warn) {
+            move.bad = true;
+            addCheckerIssue(thisLineLabel, 'warning', `Feed F${F.toFixed(3)} may be high for tool diameter ${d.toFixed(3)} in.`, suggestion, moveIndex);
+          }
+        }
+
+        moves.push(move);
+        modalSnapshots.push({
+          motion:     machine.motion,
+          dist:       machine.dist,
+          cutterComp: machine.cutterComp,
+          cycle:      machine.cycle || 'G80',
+          tool:       machine.tool,
+          spindle:    machine.spindle || 0,
+          feed:       machine.feed || 0
+        });
+
+        if (hasM0) pauseMarkers.push({index:moveIndex, type:'M0'});
+        if (hasM1) pauseMarkers.push({index:moveIndex, type:'M1'});
+
+        machine.x = tx;
+        machine.y = ty;
+        machine.z = tz;
+      } else {
+        const lastIndex = moves.length - 1;
+        if (lastIndex >= 0) {
+          if (hasM0) pauseMarkers.push({index:lastIndex, type:'M0'});
+          if (hasM1) pauseMarkers.push({index:lastIndex, type:'M1'});
+        }
+      }
+
+      if (hasZ && !cannedHereNum && !activeCannedCycle) {
+        lastExplicitZ = { line: thisLineLabel, z: machine.z };
+      }
+    }
+  }
+
+  if (machine.cutterComp !== 'G40') {
+    addCheckerIssue('Program end', 'error', 'Cutter compensation left active', 'Cancel cutter compensation with G40 after a proper lead-out.');
+  }
+  if (machine.dist === 'G91') {
+    addCheckerIssue('Program end', 'warning', 'Program ends in G91 incremental mode', 'Return to G90 before the next regular operation or before program end.');
+  }
+
+  // Look-ahead startup checks after each tool change.
+  for (const tc of toolChangeRecords) {
+    const windowLines = lines.slice(tc.lineIndex + 1, tc.lineIndex + 7);
+    const windowText = windowLines.join(' ').toUpperCase();
+    const windowWords = windowLines.flatMap(line => parseWords(line));
+    const windowG = intValues(windowWords, 'G');
+    const hasAbs = windowG.includes(90);
+    const hasWork = windowG.some(g => (g >= 54 && g <= 59) || (g >= 110 && g <= 129));
+    const hasRapidXY = windowG.includes(0) && (windowWords.some(w => w.letter === 'X') || windowWords.some(w => w.letter === 'Y'));
+    const hasSpin = /\bM\s*0?3\b|\bM\s*0?4\b/i.test(windowText);
+    const hasSpeed = /\bS\s*[0-9.+-]+/i.test(windowText);
+    const g43Line = windowLines.find(line => /\bG\s*0?43\b/i.test(line));
+    if (!hasAbs) addCheckerIssue(tc.line, 'info', 'Startup after tool change does not restate G90', 'Class format expects G90 near each tool startup.');
+    if (!hasWork) addCheckerIssue(tc.line, 'info', 'Startup after tool change does not restate work offset', 'Class format expects a work offset such as G54 near each tool startup.');
+    if (!hasRapidXY) addCheckerIssue(tc.line, 'info', 'Startup after tool change may not rapid to an XY start point', 'The workbook startup example positions with G00 X/Y after the tool change.');
+    if (!hasSpeed || !hasSpin) addCheckerIssue(tc.line, 'warning', 'Startup after tool change missing S and spindle start', 'Add S#### and M03/M04 before cutting.');
+    if (!g43Line) {
+      addCheckerIssue(tc.line, 'error', 'No G43 tool length compensation found after tool change', `Add G43 H${String(tc.tool).padStart(2,'0')} Z(clearance) after the XY/spindle startup line.`);
+    }
+  }
+
+  const scrub = document.getElementById('scrubBar');
+  if (scrub) {
+    if (moves.length > 0) {
+      scrub.disabled = false;
+      scrub.min = 0;
+      scrub.max = String(moves.length - 1);
+      scrub.value = '0';
+    } else {
+      scrub.disabled = true;
+      scrub.min = 0;
+      scrub.max = 0;
+      scrub.value = 0;
+    }
+  }
+
+  resetView();
+}
+
+/* ---------- Geometry & drawing ---------- */
+
+function computeBounds() {
+  if (!moves.length && !drillPoints.length && !stockBounds) return null;
+  const xs=[], ys=[];
+  for (const m of moves) { xs.push(m.fromX,m.toX); ys.push(m.fromY,m.toY); }
+  for (const d of drillPoints){ xs.push(d.x); ys.push(d.y); }
+  if (stockBounds){
+    xs.push(stockBounds.minX,stockBounds.maxX);
+    ys.push(stockBounds.minY,stockBounds.maxY);
+  }
+  return {
+    minX:Math.min(...xs), maxX:Math.max(...xs),
+    minY:Math.min(...ys), maxY:Math.max(...ys)
+  };
+}
+
+function strokeArcWorld(ctx, wx, wy, move) {
+  const cx = move.fromX + (move.i ?? 0);
+  const cy = move.fromY + (move.j ?? 0);
+  const r  = Math.hypot(move.i ?? 0, move.j ?? 0);
+  if (!r) return;
+
+  let startAngle = Math.atan2(move.fromY - cy, move.fromX - cx);
+  let endAngle   = Math.atan2(move.toY   - cy, move.toX   - cx);
+  let sweep = endAngle - startAngle;
+
+  if (move.type==='G2') {
+    if (sweep>0) sweep -= 2*Math.PI;
+  } else if (move.type==='G3') {
+    if (sweep<0) sweep += 2*Math.PI;
+  }
+
+  if (Math.abs(sweep)<1e-6) {
+    sweep = (move.type==='G2' ? -2*Math.PI : 2*Math.PI);
+  }
+
+  const steps = Math.max(32, Math.round(Math.abs(sweep)/(Math.PI/90)));
+
+  ctx.beginPath();
+  for (let i=0;i<=steps;i++){
+    const t=i/steps;
+    const a=startAngle + sweep*t;
+    const x=cx + r*Math.cos(a);
+    const y=cy + r*Math.sin(a);
+    const sx=wx(x), sy=wy(y);
+    if (i===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy);
+  }
+  ctx.stroke();
+}
+
+function draw() {
+  const canvas = document.getElementById('canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width  = canvas.clientWidth  || window.innerWidth;
+  const h = canvas.height = canvas.clientHeight || (window.innerHeight-160);
+
+  ctx.fillStyle = document.body.classList.contains('highContrast') ? '#ffffff' : '#020309';
+  ctx.fillRect(0,0,w,h);
+
+  const infoEl = document.getElementById('info');
+  if (!moves.length && !drillPoints.length && !stockBounds) {
+    if (infoEl) infoEl.textContent='No moves parsed.';
+    return;
+  }
+
+  const b=computeBounds();
+  if (!b) return;
+
+  const pad=30;
+  const spanX=(b.maxX-b.minX)||1;
+  const spanY=(b.maxY-b.minY)||1;
+  const baseScale=0.9*Math.min((w-2*pad)/spanX,(h-2*pad)/spanY);
+  const cx=(b.minX+b.maxX)/2;
+  const cy=(b.minY+b.maxY)/2;
+  const scale=baseScale*view.zoom;
+
+  const wx = x => w/2 + view.offsetX + (x - cx)*scale;
+  const wy = y => h/2 + view.offsetY - (y - cy)*scale;
+
+  const maxIndex = (playIndex>=0 && moves.length)
+    ? Math.min(playIndex,moves.length-1)
+    : moves.length-1;
+
+  ctx.lineWidth=1;
+  ctx.setLineDash([]);
+  const gridColor = document.body.classList.contains('highContrast') ? '#d4d4d4' : '#23283b';
+  ctx.strokeStyle=gridColor;
+  const span=Math.max(spanX,spanY);
+  const step = span<=5 ? 0.25 : span<=20 ? 1 : 5;
+  for (let gx=Math.floor(b.minX);gx<=Math.ceil(b.maxX);gx+=step){
+    const sx=wx(gx); ctx.beginPath(); ctx.moveTo(sx,0); ctx.lineTo(sx,h); ctx.stroke();
+  }
+  for (let gy=Math.floor(b.minY);gy<=Math.ceil(b.maxY);gy+=step){
+    const sy=wy(gy); ctx.beginPath(); ctx.moveTo(0,sy); ctx.lineTo(w,sy); ctx.stroke();
+  }
+
+  const axisColor = document.body.classList.contains('highContrast') ? '#000000' : '#e5e7eb';
+  ctx.strokeStyle=axisColor; ctx.lineWidth=1.5;
+  if (b.minX<=0 && b.maxX>=0){
+    const sx=wx(0); ctx.beginPath(); ctx.moveTo(sx,0); ctx.lineTo(sx,h); ctx.stroke();
+  }
+  if (b.minY<=0 && b.maxY>=0){
+    const sy=wy(0); ctx.beginPath(); ctx.moveTo(0,sy); ctx.lineTo(w,sy); ctx.stroke();
+  }
+  if (b.minX<=0 && b.maxX>=0 && b.minY<=0 && b.maxY>=0){
+    const ox=wx(0), oy=wy(0);
+    ctx.fillStyle=axisColor; ctx.beginPath(); ctx.arc(ox,oy,3,0,Math.PI*2); ctx.fill();
+    ctx.font='11px system-ui'; ctx.textBaseline='top';
+    ctx.fillText('0,0',ox+4,oy+2);
+  }
+
+  if (stockBounds){
+    const {minX,maxX,minY,maxY}=stockBounds;
+    ctx.save();
+    ctx.setLineDash([4,3]);
+    ctx.lineWidth=1.5;
+    ctx.strokeStyle=document.body.classList.contains('highContrast') ? '#000000' : '#facc15';
+    ctx.beginPath();
+    ctx.moveTo(wx(minX),wy(minY));
+    ctx.lineTo(wx(maxX),wy(minY));
+    ctx.lineTo(wx(maxX),wy(maxY));
+    ctx.lineTo(wx(minX),wy(maxY));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const toolPaths={};
+  function pushPt(toolId,x,y){
+    if (!toolPaths[toolId]) toolPaths[toolId]=[];
+    const arr=toolPaths[toolId];
+    if (arr.length){
+      const p=arr[arr.length-1];
+      if (Math.hypot(x-p.x,y-p.y)<1e-6) return;
+    }
+    toolPaths[toolId].push({x,y});
+  }
+
+  if (maxIndex>=0){
+    for (let idx=0;idx<=maxIndex;idx++){
+      const m=moves[idx];
+      if (m.type==='G0') continue;
+      const info=getToolInfo(m.tool);
+      const toolRadius=info.diameter/2;
+      const sign=(m.compMode==='G41')?1:(m.compMode==='G42')?-1:0;
+
+      if (m.isArc){
+        const cxw=m.fromX + (m.i ?? 0);
+        const cyw=m.fromY + (m.j ?? 0);
+        const r=Math.hypot(m.i ?? 0,m.j ?? 0);
+        if (!r) continue;
+
+        let startAngle=Math.atan2(m.fromY-cyw,m.fromX-cxw);
+        let endAngle  =Math.atan2(m.toY  -cyw,m.toX  -cxw);
+        let sweep=endAngle-startAngle;
+        if (m.type==='G2'){ if (sweep>0) sweep-=2*Math.PI; }
+        else if (m.type==='G3'){ if (sweep<0) sweep+=2*Math.PI; }
+        if (Math.abs(sweep)<1e-6){
+          sweep=(m.type==='G2' ? -2*Math.PI : 2*Math.PI);
+        }
+        const steps=Math.max(32,Math.round(Math.abs(sweep)/(Math.PI/90)));
+        const pts=[];
+        for (let i=0;i<=steps;i++){
+          const t=i/steps;
+          const a=startAngle + sweep*t;
+          pts.push({x:cxw + r*Math.cos(a), y:cyw + r*Math.sin(a)});
+        }
+        for (let i=0;i<pts.length;i++){
+          const pPrev=i>0?pts[i-1]:pts[i];
+          const pNext=i<pts.length-1?pts[i+1]:pts[i];
+          const dx=pNext.x-pPrev.x, dy=pNext.y-pPrev.y;
+          const len=Math.hypot(dx,dy)||1;
+          const nx=-dy/len, ny=dx/len;
+          const offX=pts[i].x + sign*toolRadius*nx;
+          const offY=pts[i].y + sign*toolRadius*ny;
+          pushPt(m.tool,offX,offY);
+        }
+      } else {
+        const p0={x:m.fromX,y:m.fromY};
+        const p1={x:m.toX,  y:m.toY};
+        const dx=p1.x-p0.x, dy=p1.y-p0.y;
+        const len=Math.hypot(dx,dy)||1;
+        const nx=-dy/len, ny=dx/len;
+        const off0x=p0.x + sign*toolRadius*nx;
+        const off0y=p0.y + sign*toolRadius*ny;
+        const off1x=p1.x + sign*toolRadius*nx;
+        const off1y=p1.y + sign*toolRadius*ny;
+        pushPt(m.tool,off0x,off0y);
+        pushPt(m.tool,off1x,off1y);
+      }
+    }
+  }
+
+  for (const key of Object.keys(toolPaths)){
+    const pts=toolPaths[key];
+    if (!pts || pts.length<2) continue;
+    const toolId=parseInt(key,10);
+    const info=getToolInfo(toolId);
+    ctx.save();
+    ctx.globalAlpha=0.26;
+    ctx.setLineDash([]);
+    ctx.lineCap='round';
+    ctx.lineJoin='round';
+    ctx.lineWidth=Math.max(1,info.diameter*scale);
+    ctx.strokeStyle=info.color;
+    ctx.beginPath();
+    let p0=pts[0];
+    ctx.moveTo(wx(p0.x),wy(p0.y));
+    for (let i=1;i<pts.length-1;i++){
+      const p=pts[i], next=pts[i+1];
+      const midX=(p.x+next.x)/2, midY=(p.y+next.y)/2;
+      ctx.quadraticCurveTo(wx(p.x),wy(p.y),wx(midX),wy(midY));
+    }
+    const plast=pts[pts.length-1];
+    ctx.lineTo(wx(plast.x),wy(plast.y));
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  if (drillPoints.length && maxIndex>=0){
+    ctx.save();
+    for (const p of drillPoints){
+      if (p.index>maxIndex) continue;
+      const info=getToolInfo(p.tool);
+      const sx=wx(p.x), sy=wy(p.y);
+      const rPix=Math.max(3, info.diameter*scale*0.6);
+      ctx.fillStyle=info.color;
+      ctx.beginPath(); ctx.arc(sx,sy,rPix,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  if (maxIndex>=0){
+    for (let idx=0;idx<=maxIndex;idx++){
+      const m=moves[idx];
+      let color;
+      if (m.bad) color='#f97373';
+      else if (m.type==='G0') color='#9ca3af';
+      else if (m.type==='G1') color='#22c55e';
+      else if (m.type==='G2') color='#38bdf8';
+      else if (m.type==='G3') color='#e879f9';
+      else color='#e5e7eb';
+      const isLast=(idx===maxIndex);
+      ctx.lineWidth=isLast?3:2;
+      if (isLast && m.type!=='G0' && !m.bad) color='#fde047';
+      ctx.strokeStyle=color;
+      ctx.setLineDash(m.type==='G0' ? [6,4] : []);
+      if (m.isArc){
+        strokeArcWorld(ctx,wx,wy,m);
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(wx(m.fromX),wy(m.fromY));
+        ctx.lineTo(wx(m.toX),  wy(m.toY));
+        ctx.stroke();
+      }
+    }
+    const last=moves[maxIndex];
+    ctx.save();
+    ctx.fillStyle=last.bad ? '#f97373' : '#fde047';
+    ctx.beginPath(); ctx.arc(wx(last.toX),wy(last.toY),4,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  /* Iso view */
+  (function drawIso(){
+    if (!moves.length || maxIndex<0) return;
+    const isoW=Math.min(260,w*0.3);
+    const isoH=Math.min(260,h*0.3);
+    const isoLeft=w-isoW-10;
+    const isoTop=10;
+    const pts=[];
+    for (let idx=0;idx<=maxIndex;idx++){
+      const m=moves[idx];
+      pts.push({x:m.fromX,y:m.fromY,z:m.fromZ});
+      pts.push({x:m.toX,  y:m.toY,  z:m.toZ});
+    }
+    for (const d of drillPoints){
+      if (d.index<=maxIndex) pts.push({x:d.x,y:d.y,z:d.z||0});
+    }
+    if (!pts.length) return;
+
+    const ang=Math.PI/6;
+    const cosA=Math.cos(ang), sinA=Math.sin(ang);
+    let minU=Infinity,maxU=-Infinity,minV=Infinity,maxV=-Infinity;
+    function project(p){
+      const u=(p.x-p.y)*cosA;
+      const v=p.z + (p.x+p.y)*sinA;
+      if (u<minU) minU=u;
+      if (u>maxU) maxU=u;
+      if (v<minV) minV=v;
+      if (v>maxV) maxV=v;
+      return {u,v};
+    }
+    pts.map(project);
+    const spanU=(maxU-minU)||1;
+    const spanV=(maxV-minV)||1;
+    const isoScale=0.9*Math.min(isoW/spanU,isoH/spanV);
+    function isoScreen(x,y,z){
+      const u=(x-y)*cosA;
+      const v=z + (x+y)*sinA;
+      const sx=isoLeft + (u-minU)*isoScale;
+      const sy=isoTop + isoH - (v-minV)*isoScale;
+      return {sx,sy};
+    }
+
+    ctx.save();
+    ctx.globalAlpha=0.95;
+    ctx.fillStyle=document.body.classList.contains('highContrast')?'#f9fafb':'#050816';
+    ctx.fillRect(isoLeft,isoTop,isoW,isoH);
+    ctx.globalAlpha=1;
+    ctx.strokeStyle=document.body.classList.contains('highContrast')?'#111827':'#4b5563';
+    ctx.lineWidth=1;
+    ctx.strokeRect(isoLeft,isoTop,isoW,isoH);
+    ctx.restore();
+
+    ctx.save();
+    for (let idx=0;idx<=maxIndex;idx++){
+      const m=moves[idx];
+      let color;
+      if (m.bad) color='#f97373';
+      else if (m.type==='G0') color='#9ca3af';
+      else if (m.type==='G1') color='#22c55e';
+      else if (m.type==='G2') color='#38bdf8';
+      else if (m.type==='G3') color='#e879f9';
+      else color='#e5e7eb';
+      ctx.strokeStyle=color;
+      ctx.lineWidth=(idx===maxIndex)?2:1;
+      ctx.setLineDash(m.type==='G0' ? [4,3] : []);
+      if (m.isArc){
+        const cxw=m.fromX+(m.i ?? 0);
+        const cyw=m.fromY+(m.j ?? 0);
+        const r=Math.hypot(m.i ?? 0,m.j ?? 0);
+        if (!r) continue;
+        let startAngle=Math.atan2(m.fromY-cyw,m.fromX-cxw);
+        let endAngle  =Math.atan2(m.toY  -cyw,m.toX  -cxw);
+        let sweep=endAngle-startAngle;
+        if (m.type==='G2'){ if (sweep>0) sweep-=2*Math.PI; }
+        else if (m.type==='G3'){ if (sweep<0) sweep+=2*Math.PI; }
+        if (Math.abs(sweep)<1e-6){
+          sweep=(m.type==='G2' ? -2*Math.PI : 2*Math.PI);
+        }
+        const steps=Math.max(24,Math.round(Math.abs(sweep)/(Math.PI/90)));
+        ctx.beginPath();
+        for (let i=0;i<=steps;i++){
+          const t=i/steps;
+          const a=startAngle + sweep*t;
+          const x=cxw + r*Math.cos(a);
+          const y=cyw + r*Math.sin(a);
+          const {sx,sy}=isoScreen(x,y,m.fromZ);
+          if (i===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy);
+        }
+        ctx.stroke();
+      } else {
+        const p0=isoScreen(m.fromX,m.fromY,m.fromZ);
+        const p1=isoScreen(m.toX,  m.toY,  m.toZ);
+        ctx.beginPath(); ctx.moveTo(p0.sx,p0.sy); ctx.lineTo(p1.sx,p1.sy); ctx.stroke();
+      }
+    }
+    if (maxIndex>=0){
+      const last=moves[maxIndex];
+      const {sx,sy}=isoScreen(last.toX,last.toY,last.toZ);
+      ctx.fillStyle=last.bad?'#f97373':'#fde047';
+      ctx.beginPath(); ctx.arc(sx,sy,3,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.font='11px system-ui';
+    ctx.fillStyle=document.body.classList.contains('highContrast')?'#111827':'#e5e7eb';
+    ctx.textBaseline='bottom';
+    ctx.fillText('Iso 30 deg',isoLeft+6,isoTop+isoH-4);
+    ctx.restore();
+  })();
+
+  if (maxIndex>=0){
+    const snap=modalSnapshots[maxIndex];
+    const cur=moves[maxIndex];
+    const info=getToolInfo(snap.tool);
+    const hudX=10,hudY=10,hudW=190,hudH=88;
+    ctx.save();
+    ctx.globalAlpha=0.9;
+    ctx.fillStyle=document.body.classList.contains('highContrast')?'#e5e7eb':'#020617';
+    ctx.fillRect(hudX,hudY,hudW,hudH);
+    ctx.globalAlpha=1;
+    ctx.strokeStyle=document.body.classList.contains('highContrast')?'#000000':'#4b5563';
+    ctx.strokeRect(hudX,hudY,hudW,hudH);
+    ctx.font='11px system-ui';
+    ctx.textBaseline='top';
+    ctx.fillStyle=document.body.classList.contains('highContrast')?'#000000':'#f9fafb';
+    let yy=hudY+4;
+    ctx.fillText(`Line: ${cur.lineLabel}`,hudX+6,yy); yy+=14;
+    ctx.fillText(`T${snap.tool}  D${info.diameter.toFixed(3)}"`,hudX+6,yy); yy+=14;
+    ctx.fillText(`Modals: ${snap.motion} ${snap.dist} ${snap.cutterComp} ${snap.cycle}`,hudX+6,yy); yy+=14;
+    ctx.fillText(`S${snap.spindle.toFixed(0)}   F${snap.feed.toFixed(3)}`,hudX+6,yy); yy+=14;
+    ctx.fillText(`XYZ: ${cur.toX.toFixed(3)}, ${cur.toY.toFixed(3)}, ${cur.toZ.toFixed(3)}`,hudX+6,yy);
+    ctx.restore();
+  }
+
+  if (infoEl){
+    let infoText=`Moves: ${moves.length}\n`;
+    infoText += `Clearance Z: ${Number.isFinite(clearanceZ) ? clearanceZ.toFixed(4) : 'NOT SET'}\n`;
+    if (moves.length){
+      const end=moves[moves.length-1];
+      infoText+=`End: X${end.toX.toFixed(4)} Y${end.toY.toFixed(4)} Z${end.toZ.toFixed(4)}\n`;
+    }
+    if (maxIndex>=0){
+      const cur=moves[maxIndex];
+      infoText+=`\nCurrent move: ${cur.lineLabel}\n`;
+      infoText+=`  End: X${cur.toX.toFixed(4)} Y${cur.toY.toFixed(4)} Z${cur.toZ.toFixed(4)}\n`;
+      infoText+=`  Type: ${cur.type}   Length XY: ${cur.length2D.toFixed(4)} in\n`;
+      const snap=modalSnapshots[maxIndex];
+      if (snap){
+        infoText+=`  Modals: ${snap.motion} ${snap.dist} ${snap.cutterComp} ${snap.cycle}\n`;
+        infoText+=`  Tool: T${snap.tool}   S${snap.spindle}   F${snap.feed}\n`;
+      }
+      if (cur.isArc){
+        const sx=cur.fromX, sy=cur.fromY;
+        const ex=cur.toX,   ey=cur.toY;
+        const cxArc=sx + (cur.i ?? 0);
+        const cyArc=sy + (cur.j ?? 0);
+        const r=cur.radius ?? Math.hypot(sx-cxArc,sy-cyArc);
+        const chord=Math.hypot(ex-sx,ey-sy);
+        let startAngle=Math.atan2(sy-cyArc,sx-cxArc);
+        let endAngle  =Math.atan2(ey-cyArc,ex-cxArc);
+        let sweep=endAngle-startAngle;
+        if (cur.type==='G2'){ if (sweep>0) sweep-=2*Math.PI; }
+        else if (cur.type==='G3'){ if (sweep<0) sweep+=2*Math.PI; }
+        if (Math.abs(sweep)<1e-6){
+          sweep=(cur.type==='G2'? -2*Math.PI : 2*Math.PI);
+        }
+        const absSweep=Math.abs(sweep);
+        const sweepDeg=absSweep*180/Math.PI;
+        const arcLen=absSweep*r;
+        let sagitta=NaN;
+        if (r>0 && chord<=2*r){
+          sagitta=r-Math.sqrt(r*r - (chord*chord)/4);
+        }
+        infoText+=`\nArc geometry:\n`;
+        infoText+=`  Start:  X${sx.toFixed(4)}  Y${sy.toFixed(4)}\n`;
+        infoText+=`  End:    X${ex.toFixed(4)}  Y${ey.toFixed(4)}\n`;
+        infoText+=`  Center: X${cxArc.toFixed(4)}  Y${cyArc.toFixed(4)} (I=${(cur.i ?? 0).toFixed(4)}, J=${(cur.j ?? 0).toFixed(4)})\n`;
+        infoText+=`  Radius: ${r.toFixed(4)} in\n`;
+        infoText+=`  Sweep:  ${sweepDeg.toFixed(2)}� (${cur.type})\n`;
+        infoText+=`  Chord length: ${chord.toFixed(4)} in\n`;
+        infoText+=`  Arc length:   ${arcLen.toFixed(4)} in\n`;
+        if (!isNaN(sagitta)) infoText+=`  Sagitta:      ${sagitta.toFixed(4)} in\n`;
+      }
+      if (cur.bad){
+        const curErrs=errors.filter(e=>e.moveIndex===maxIndex);
+        if (curErrs.length){
+          infoText+=`\nIssues on this move:\n`;
+          curErrs.forEach(e=>{
+            infoText+=`  � ${e.msg}\n`;
+            if (e.suggestion) infoText+=`    Suggestion: ${e.suggestion}\n`;
+          });
+        }
+      }
+    }
+    const toolKeys=Object.keys(toolStats);
+    if (toolKeys.length){
+      infoText+=`\nPath length by tool (XY):\n`;
+      for (const t of toolKeys){
+        infoText+=`  T${t}: ${toolStats[t].len2D.toFixed(4)} in\n`;
+      }
+    }
+    if (errors.length){
+      infoText+=`\nErrors (${errors.length}):\n`;
+      const maxShow=6;
+      for (let i=0;i<errors.length && i<maxShow;i++){
+        const e=errors[i];
+        infoText+=`  ${e.line}: ${e.msg}\n`;
+        if (e.suggestion) infoText+=`    Suggestion: ${e.suggestion}\n`;
+      }
+      if (errors.length>maxShow){
+        infoText+=`  ...and ${errors.length-maxShow} more.\n`;
+      }
+    } else {
+      infoText+=`\nErrors: none detected (basic checks only).\n`;
+    }
+    infoEl.textContent=infoText;
+  }
+
+  const scrub=document.getElementById('scrubBar');
+  const scrubLabel=document.getElementById('scrubLabel');
+  if (scrub && scrubLabel){
+    if (!moves.length){
+      scrubLabel.textContent='Move: 0 / 0';
+    } else {
+      const idx=maxIndex>=0?maxIndex:0;
+      scrub.value=String(idx);
+      scrubLabel.textContent=`Move: ${idx+1} / ${moves.length}`;
+    }
+  }
+
+  if (maxIndex>=0){
+    highlightProgramLine(moves[maxIndex].lineIndex);
+  }
+}
+
+/* ---------- View controls ----------
+   Zoom/Fit buttons and labels. clampZoom() prevents mobile pinch zoom
+   from becoming too tiny or too huge.
+---------- */
+
+function clampZoom(){
+  view.zoom = Math.max(0.05, Math.min(80, view.zoom));
+}
+function updateZoomLabel(){
+  clampZoom();
+  const zEl=document.getElementById('zoomLabel');
+  if (zEl) zEl.textContent=`Zoom: ${view.zoom.toFixed(2)}x`;
+}
+function zoomIn(){ view.zoom*=1.25; updateZoomLabel(); draw(); }
+function zoomOut(){ view.zoom/=1.25; updateZoomLabel(); draw(); }
+function resetView(){ view.zoom=1; view.offsetX=0; view.offsetY=0; updateZoomLabel(); draw(); }
+
+/* ---------- Playback ---------- */
+
+function shouldPauseAtIndex(idx){
+  for (const m of pauseMarkers){
+    if (m.index===idx){
+      if (m.type==='M0' && pauseOnM0) return true;
+      if (m.type==='M1' && pauseOnM1) return true;
+    }
+  }
+  return false;
+}
+
+function startPlay(){
+  if (!moves.length) return;
+  if (playIndex<0 || playIndex>=moves.length-1) playIndex=-1;
+  if (isPlaying) return;
+  isPlaying=true;
+  if (playTimer) clearTimeout(playTimer);
+
+  const stepFn=()=>{
+    if (!isPlaying) return;
+    if (playIndex>=moves.length-1){
+      if (loopPlayback && moves.length>0){
+        playIndex=-1;
+      } else {
+        playIndex=moves.length-1;
+        draw();
+        isPlaying=false;
+        return;
+      }
+    }
+    playIndex++;
+    draw();
+    if (shouldPauseAtIndex(playIndex)){
+      isPlaying=false;
+      return;
+    }
+    const interval=Math.max(30,baseInterval/speedFactor);
+    playTimer=setTimeout(stepFn,interval);
+  };
+  stepFn();
+}
+function pausePlay(){
+  isPlaying=false;
+  if (playTimer){ clearTimeout(playTimer); playTimer=null; }
+  draw();
+}
+function stepOnce(){
+  if (!moves.length) return;
+  isPlaying=false;
+  if (playTimer){ clearTimeout(playTimer); playTimer=null; }
+  if (playIndex<0) playIndex=0;
+  else if (playIndex<moves.length-1) playIndex++;
+  draw();
+}
+function stepBack(){
+  if (!moves.length) return;
+  isPlaying=false;
+  if (playTimer){ clearTimeout(playTimer); playTimer=null; }
+  if (playIndex<=0) playIndex=0;
+  else playIndex--;
+  draw();
+}
+function jumpToNextError(){
+  if (!errors.length || !moves.length) return;
+  let current = (playIndex>=0 ? playIndex : -1);
+  const indices = errors
+    .filter(e=>typeof e.moveIndex==='number' && e.moveIndex>=0)
+    .map(e=>e.moveIndex)
+    .sort((a,b)=>a-b);
+  if (!indices.length) return;
+  let target=null;
+  for (const mi of indices){
+    if (mi>current){ target=mi; break; }
+  }
+  if (target===null) target=indices[0];
+  playIndex=target;
+  isPlaying=false;
+  if (playTimer){ clearTimeout(playTimer); playTimer=null; }
+  draw();
+}
+
+/* ---------- Program text sync ---------- */
+
+function highlightProgramLine(lineIndex){
+  const ta=document.getElementById('program');
+  if (!ta) return;
+  const text=ta.value;
+  const lines=text.split('\n');
+  if (lineIndex<0 || lineIndex>=lines.length) return;
+  let pos=0;
+  for (let i=0;i<lines.length;i++){
+    const len=lines[i].length;
+    if (i===lineIndex){
+      const start=pos, end=pos+len;
+      try{ ta.setSelectionRange(start,end); } catch(e){}
+      break;
+    }
+    pos+=len+1;
+  }
+}
+
+function jumpToLineUnderCursor(){
+  if (!moves.length) return;
+  const ta=document.getElementById('program');
+  if (!ta) return;
+  const pos=ta.selectionStart ?? 0;
+  const text=ta.value;
+  const pre=text.slice(0,pos);
+  const lineIndex=pre.split('\n').length-1;
+  let candidate=-1;
+  for (let i=0;i<moves.length;i++){
+    if (moves[i].lineIndex===lineIndex) candidate=i;
+  }
+  if (candidate>=0){
+    playIndex=candidate;
+    isPlaying=false;
+    if (playTimer){ clearTimeout(playTimer); playTimer=null; }
+    draw();
+  }
+}
+
+/* ---------- Scrub & export ---------- */
+
+function setupScrubBar(){
+  const scrub=document.getElementById('scrubBar');
+  if (!scrub) return;
+  scrub.addEventListener('input',()=>{
+    if (!moves.length) return;
+    const idx=parseInt(scrub.value,10);
+    if (!Number.isFinite(idx)) return;
+    playIndex=Math.max(0,Math.min(moves.length-1,idx));
+    isPlaying=false;
+    if (playTimer){ clearTimeout(playTimer); playTimer=null; }
+    draw();
+  });
+}
+function exportPNG(){
+  const canvas=document.getElementById('canvas');
+  if (!canvas) return;
+  const url=canvas.toDataURL('image/png');
+  const a=document.createElement('a');
+  a.href=url; a.download='toolpath.png';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+}
+
+/* ---------- Save/load ---------- */
+
+function saveProgramAsNC(){
+  const ta=document.getElementById('program');
+  if (!ta) return;
+  const text=ta.value;
+  let filename=prompt('Save file name (with or without .nc):','program.nc');
+  if (filename===null) return;
+  filename=filename.trim();
+  if (!filename) return;
+  if (!filename.toLowerCase().endsWith('.nc')) filename+='.nc';
+  const blob=new Blob([text],{type:'text/plain'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); document.body.removeChild(a); },0);
+}
+function triggerFileLoad(){
+  const input=document.getElementById('fileInput');
+  if (!input) return;
+  input.value='';
+  input.click();
+}
+function handleFileSelected(evt){
+  const input=evt.target;
+  if (!input.files || !input.files.length) return;
+  const file=input.files[0];
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const ta=document.getElementById('program');
+    if (!ta) return;
+    ta.value=e.target.result;
+    loadAndDraw();
+  };
+  reader.readAsText(file);
+}
+
+/* ---------- N-line helpers ---------- */
+
+function renumberLines(){
+  const ta=document.getElementById('program');
+  if (!ta) return;
+  let startStr=prompt('Starting N value?','10');
+  if (startStr===null) return;
+  let stepStr=prompt('Increment between lines?','10');
+  if (stepStr===null) return;
+  let n=parseInt(startStr,10);
+  let step=parseInt(stepStr,10);
+  if (!Number.isFinite(n)) n=10;
+  if (!Number.isFinite(step)||step<=0) step=10;
+  const lines=ta.value.split('\n');
+  const out=lines.map(line=>{
+    const m=line.match(/^(\s*)N[0-9.]+(.*)$/i);
+    if (m){
+      const prefix=m[1]||'';
+      const rest=m[2]||'';
+      const label='N'+n;
+      n+=step;
+      return prefix+label+rest;
+    }
+    return line;
+  });
+  ta.value=out.join('\n');
+}
+function insertNLines(){
+  const ta=document.getElementById('program');
+  if (!ta) return;
+  let startStr=prompt('Starting N value?','10');
+  if (startStr===null) return;
+  let stepStr=prompt('Increment between lines?','10');
+  if (stepStr===null) return;
+  let n=parseInt(startStr,10);
+  let step=parseInt(stepStr,10);
+  if (!Number.isFinite(n)) n=10;
+  if (!Number.isFinite(step)||step<=0) step=10;
+
+  const lines=ta.value.split('\n');
+  const out=lines.map(line=>{
+    // Do not number blank lines or standalone percent delimiters.
+    if (!line.trim() || line.trim()==='%') return line;
+
+    // If a line already starts with an N label, leave it alone and move the counter forward.
+    if (/^\s*N[0-9.]+/i.test(line)) {
+      n += step;
+      return line;
+    }
+
+    const m=line.match(/^(\s*)(.*)$/);
+    const prefix=(m && m[1]) ? m[1] : '';
+    const rest=(m && m[2]) ? m[2] : line.trimStart();
+    const label='N'+n;
+    n+=step;
+    return prefix+label+rest;
+  });
+  ta.value=out.join('\n');
+}
+
+function removeLineNumbers(){
+  const ta=document.getElementById('program');
+  if (!ta) return;
+  const lines=ta.value.split('\n');
+  const out=lines.map(line=>line.replace(/^(\s*)N[0-9.]+\s*/i,'$1'));
+  ta.value=out.join('\n');
+}
+
+
+/* ---------- Student code review report: no-server mode ---------- */
+
+function getCursorLineIndex(){
+  const ta=document.getElementById('program');
+  if (!ta) return -1;
+  const pos=ta.selectionStart ?? 0;
+  return ta.value.slice(0,pos).split('\n').length-1;
+}
+
+function currentProgramLine(lineIndex){
+  const ta=document.getElementById('program');
+  if (!ta || lineIndex<0) return '';
+  const lines=ta.value.split('\n');
+  return lines[lineIndex] || '';
+}
+
+function round4(v){ return Number.isFinite(v) ? Math.round(v*10000)/10000 : null; }
+
+function detectUnits(){
+  const text=(document.getElementById('program')?.value || '').toUpperCase();
+  const g20=text.lastIndexOf('G20');
+  const g21=text.lastIndexOf('G21');
+  if (g20<0 && g21<0) return 'unknown';
+  return g20>g21 ? 'inch / G20' : 'metric / G21';
+}
+
+function setAssistantStatus(text, cls){
+  const el=document.getElementById('assistantStatus');
+  if (!el) return;
+  el.className=cls || '';
+  el.textContent=text;
+}
+
+function setAssistantHTML(html){
+  const out=document.getElementById('assistantOutput');
+  if (out) out.innerHTML=html;
+}
+
+function escapeHTML(s){
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function localSeverity(issueList){
+  const list = issueList || errors;
+  if (!list.length) return 'pass';
+  const stopWords=/invalid|missing|cannot|must|mismatch|unsafe|crash|below zero|above the clearance|R-plane|R plane|G41|G42|Q peck|P dwell|tool length|spindle|rapid/i;
+  return list.some(e=>e.severity==='error' || stopWords.test((e.msg||'')+' '+(e.suggestion||''))) ? 'stop' : 'caution';
+}
+
+function formatMaybe(v, digits=4){
+  return Number.isFinite(v) ? Number(v).toFixed(digits) : 'not set';
+}
+
+function getProgramText(){
+  return document.getElementById('program')?.value || '';
+}
+
+function getProgramLines(){
+  return getProgramText().split('\n');
+}
+
+function hasCode(regex){
+  return regex.test(getProgramText().toUpperCase());
+}
+
+function collectProgramSetupChecks(){
+  const txt=getProgramText().toUpperCase();
+  const lines=getProgramLines();
+  const safetyLine = lines.find(line => /G40/i.test(line) && (/G17|G20|G21|G49|G80|G90|G91|G94/i.test(line)));
+  return [
+    {label:'Units selected', ok:/\bG20\b|\bG21\b/.test(txt), note:detectUnits()},
+    {label:'Plane selected', ok:/\bG17\b|\bG18\b|\bG19\b/.test(txt), note:(/\bG17\b/.test(txt)?'G17 XY plane found':'check plane')},
+    {label:'Distance mode selected', ok:/\bG90\b|\bG91\b/.test(txt), note:(/\bG90\b/.test(txt)?'G90 absolute found':'G91/incremental or unknown')},
+    {label:'Safety cancel line includes G40', ok:/\bG40\b/.test(txt), note:safetyLine ? 'G40 found in startup/safety context' : (/\bG40\b/.test(txt) ? 'G40 found outside obvious startup context' : 'G40 not found')},
+    {label:'Tool length cancel / active tool length used', ok:/\bG49\b/.test(txt) || /\bG43\b/.test(txt), note:/\bG43\b/.test(txt)?'G43 found':'G49 only or missing G43'},
+    {label:'Canned cycle cancel', ok:/\bG80\b/.test(txt), note:/\bG80\b/.test(txt)?'G80 found':'missing G80'},
+    {label:'Work offset', ok:/\bG5[4-9]\b/.test(txt), note:(txt.match(/\bG5[4-9]\b/)||['not found'])[0]},
+    {label:'Spindle command', ok:/\bM0?3\b|\bM0?4\b/.test(txt), note:/\bM0?3\b/.test(txt)?'M03 found':(/\bM0?4\b/.test(txt)?'M04 found':'not found')},
+    {label:'Program end', ok:/\bM30\b|\bM02\b/.test(txt), note:/\bM30\b/.test(txt)?'M30 found':(/\bM02\b/.test(txt)?'M02 found':'not found')}
+  ];
+}
+
+function collectToolsUsed(){
+  const used=new Set();
+  const txt=getProgramText();
+  const re=/\bT\s*(\d+)\b/gi;
+  let m;
+  while ((m=re.exec(txt)) !== null) used.add(parseInt(m[1],10));
+  return [...used].filter(Number.isFinite).sort((a,b)=>a-b);
+}
+
+function collectMotionStats(){
+  const stats={G0:0,G1:0,G2:0,G3:0,other:0,cuttingLength:0,rapidLength:0,outsideStock:0,badMoves:0};
+  for (const m of moves){
+    if (stats[m.type] !== undefined) stats[m.type]++; else stats.other++;
+    if (m.type==='G0') stats.rapidLength += m.length2D || 0;
+    if (m.type==='G1' || m.isArc) stats.cuttingLength += m.length2D || 0;
+    if (m.outsideStock) stats.outsideStock++;
+    if (m.bad) stats.badMoves++;
+  }
+  return stats;
+}
+
+function getReviewedIssueData(){
+  const boxes=[...document.querySelectorAll('.issue-include')];
+  if (!boxes.length){
+    return {
+      reviewed:false,
+      included: errors.map((e,idx)=>({...e, originalIndex:idx, instructorNote:''})),
+      ignored: []
+    };
+  }
+  const included=[];
+  const ignored=[];
+  boxes.forEach(box=>{
+    const idx=parseInt(box.dataset.issueIndex,10);
+    if (!errors[idx]) return;
+    const noteEl=document.querySelector(`.issue-note[data-issue-index="${idx}"]`);
+    const issue={...errors[idx], originalIndex:idx, instructorNote: noteEl ? noteEl.value.trim() : ''};
+    if (box.checked) included.push(issue); else ignored.push(issue);
+  });
+  return {reviewed:true, included, ignored};
+}
+
+function getIncludedIssues(){
+  return getReviewedIssueData().included;
+}
+
+function getManualField(id, fallback=''){
+  const el=document.getElementById(id);
+  return el ? (el.value || fallback) : fallback;
+}
+
+
+function buildIssueReviewHTML(){
+  const sev = localSeverity();
+  let html='<div class="local-summary">';
+  html+=`<strong>Local only:</strong> This checker runs in the browser. Nothing is sent out.<br>`;
+  html+=`<strong>Step 1:</strong> include real issues and remove false positives. <strong>Step 2:</strong> generate a clean correction report.<br>`;
+  html+=`<strong>Status:</strong> ${sev==='pass'?'PASS':sev==='caution'?'CAUTION':'STOP'} &nbsp; <strong>Raw flags:</strong> ${errors.length} &nbsp; <strong>Moves:</strong> ${moves.length} &nbsp; <strong>Units:</strong> ${escapeHTML(detectUnits())}`;
+  html+='</div>';
+  html+='<h3>Step 1 — Include / remove issue flags</h3>';
+  html+='<p class="mini-note">Checked items will appear in the correction report. Unchecked items are treated as removed false positives and are kept out of the student report.</p>';
+  html+='<div class="review-counts"><div class="count-card"><strong>Raw flags</strong><span id="rawIssueCount">'+errors.length+'</span></div><div class="count-card"><strong>Included</strong><span id="approvedIssueCount">0</span></div><div class="count-card"><strong>Removed</strong><span id="removedIssueCount">0</span></div></div>';
+  html+='<div class="review-toolbar"><button type="button" class="btn-secondary" onclick="checkAllIssues(true)">Include All</button><button type="button" class="btn-secondary" onclick="checkAllIssues(false)">Remove All</button><button type="button" class="btn-secondary" onclick="updateReviewCounts()">Refresh Counts</button></div>';
+  if (errors.length){
+    html+=errors.map((e,idx)=>{
+      const issueClass = (e.severity==='error' || /invalid|missing|cannot|must|mismatch|unsafe|crash|below zero|above the clearance|R-plane|R plane|G41|G42|Q peck|P dwell|tool length|spindle|rapid/i.test((e.msg||'')+' '+(e.suggestion||''))) ? 'stop' : (e.severity==='info' ? 'pass' : 'caution');
+      return `<div class="issue review-row ${issueClass}">
+        <label class="issue-review-head">
+          <input class="issue-include" type="checkbox" data-issue-index="${idx}" checked onchange="updateReviewCounts()">
+          <span class="issue-review-main"><span class="line-tag">${escapeHTML(e.line || 'line ?')}</span>${escapeHTML(e.msg || '')}${e.suggestion?`<br><em>Suggested correction/check:</em> ${escapeHTML(e.suggestion)}`:''}</span>
+          <span class="issue-action">include</span>
+        </label>
+        <textarea class="issue-note" data-issue-index="${idx}" placeholder="Optional note for this issue or why it is a false positive"></textarea>
+      </div>`;
+    }).join('');
+  } else {
+    html+='<div class="issue pass"><span class="line-tag">OK</span>No issues detected by the built-in checker.</div>';
+  }
+  html+='<h3>Step 2 — Report details</h3>';
+  html+='<div class="report-controls">';
+  html+='<label>Name<input id="reportStudent" type="text" placeholder="Name"></label>';
+  html+='<label>Assignment<input id="reportAssignment" type="text" placeholder="Assignment / operation"></label>';
+  html+='</div>';
+  html+=`<div class="assistant-actions"><button type="button" class="btn-ai" onclick="generateFixReport()">Generate Clean Correction Report</button></div>`;
+  setTimeout(updateReviewCounts,0);
+  return html;
+}
+
+function updateReviewCounts(){
+  const boxes=[...document.querySelectorAll('.issue-include')];
+  const included=boxes.filter(b=>b.checked).length;
+  const removed=boxes.length-included;
+  const a=document.getElementById('approvedIssueCount');
+  const r=document.getElementById('removedIssueCount');
+  if (a) a.textContent=String(included);
+  if (r) r.textContent=String(removed);
+  boxes.forEach(box=>{
+    const row=box.closest('.review-row');
+    const pill=row ? row.querySelector('.issue-action') : null;
+    if (pill) pill.textContent=box.checked ? 'included' : 'removed';
+    if (row) row.style.opacity=box.checked ? '1' : '.62';
+  });
+}
+
+function reviewIssuesForFixing(){
+  setAssistantStatus('Checking','working');
+  loadAndDraw();
+  const sev=localSeverity();
+  setAssistantStatus(sev==='pass'?'PASS':sev==='caution'?'CAUTION':'STOP',sev);
+  setAssistantHTML(buildIssueReviewHTML());
+}
+
+function checkAllIssues(checked){
+  document.querySelectorAll('.issue-include').forEach(box=>{ box.checked=!!checked; });
+  updateReviewCounts();
+}
+
+function buildFixReportText(){
+  const now=new Date();
+  const review=getReviewedIssueData();
+  const includedIssues=review.included;
+  const removedIssues=review.ignored;
+  const sev=localSeverity(includedIssues);
+  const severityLabel=sev==='pass' ? 'No included local checker issues' : sev==='caution' ? 'Review items remain' : 'Correction required';
+  const setupChecks=collectProgramSetupChecks();
+  const toolsUsed=collectToolsUsed();
+  const motionStats=collectMotionStats();
+  const endMove=moves.length ? moves[moves.length-1] : null;
+  const student=getManualField('reportStudent','______________________________');
+  const assignment=getManualField('reportAssignment','___________________________');
+  const setupNeedsReview=setupChecks.filter(c=>!c.ok).length;
+  const lines=[];
+
+  lines.push('MACT G-Code Correction Report');
+  lines.push('Name: '+student);
+  lines.push('Assignment: '+assignment);
+  lines.push('Generated: '+now.toLocaleString());
+  lines.push('');
+
+  lines.push('Status Summary');
+  lines.push('• Local checker status after review: '+severityLabel);
+  lines.push('• Included correction items: '+includedIssues.length);
+  lines.push('• Removed false positives: '+removedIssues.length);
+  lines.push('• Setup / safety checks needing review: '+setupNeedsReview);
+  lines.push('');
+
+  lines.push('What Worked');
+  if (moves.length){
+    lines.push('• The program loaded and produced parsed machine motion in the backplot.');
+  } else {
+    lines.push('• No usable machine motion was parsed. Review the program format and required operation.');
+  }
+  if (setupChecks.some(c=>c.ok && /inch|metric|XY plane|absolute|program end/i.test(c.label))){
+    lines.push('• Some basic setup codes are present where checked by the local tool.');
+  }
+  if (toolsUsed.length){
+    lines.push('• Tool calls were detected and included in the review.');
+  }
+  if (!includedIssues.length){
+    lines.push('• No included local checker issues remain after review. Still verify the program against the assignment.');
+  }
+  lines.push('');
+
+  lines.push('Items to Correct / Review');
+  if (includedIssues.length){
+    includedIssues.forEach((e,idx)=>{
+      lines.push((idx+1)+'. '+(e.line || 'Line ?')+': '+(e.msg || 'Issue'));
+      if (e.suggestion) lines.push('   • Suggested correction/check: '+e.suggestion);
+      if (e.instructorNote) lines.push('   • Note: '+e.instructorNote);
+    });
+  } else {
+    lines.push('• No included local checker issues. Continue with simulation, setup verification, and instructor/shop requirements.');
+  }
+  lines.push('');
+
+  lines.push('Program / Setup Notes');
+  lines.push('• Units: '+detectUnits());
+  lines.push('• Parsed moves: '+moves.length);
+  lines.push('• Drill points / canned-cycle points: '+drillPoints.length);
+  lines.push('• Cutting XY length: '+motionStats.cuttingLength.toFixed(4));
+  lines.push('• Rapid XY length: '+motionStats.rapidLength.toFixed(4));
+  if (endMove){
+    lines.push('• Program end position: X'+endMove.toX.toFixed(4)+' Y'+endMove.toY.toFixed(4)+' Z'+endMove.toZ.toFixed(4));
+  }
+  lines.push('• Clearance Z setting: '+formatMaybe(clearanceZ,4));
+  if (stockBounds){
+    lines.push('• Stock bounds: X'+stockBounds.minX+' to '+stockBounds.maxX+', Y'+stockBounds.minY+' to '+stockBounds.maxY);
+    lines.push('• Moves outside stock bounds: '+motionStats.outsideStock);
+  } else {
+    lines.push('• Stock bounds: not set, so outside-stock verification is limited.');
+  }
+  lines.push('');
+
+  lines.push('Tools Found');
+  if (toolsUsed.length){
+    toolsUsed.forEach(t=>{
+      const info=toolTable[t];
+      const len=toolStats[t]?.len2D || 0;
+      lines.push('• T'+t+': diameter '+(info && Number.isFinite(info.diameter) ? info.diameter.toFixed(4) : 'not entered')+', XY path length '+len.toFixed(4));
+    });
+  } else {
+    lines.push('• No T-codes found.');
+  }
+  lines.push('');
+
+  if (removedIssues.length){
+    lines.push('Removed Flags / Not Included');
+    removedIssues.forEach((e,idx)=>{
+      lines.push((idx+1)+'. '+(e.line || 'Line ?')+': '+(e.msg || 'Issue'));
+      if (e.instructorNote) lines.push('   • Note: '+e.instructorNote);
+    });
+    lines.push('');
+  }
+
+  lines.push('Verification Steps');
+  lines.push('• Backplot / simulate the corrected program.');
+  lines.push('• Confirm work offset, tool length offset, and tool diameter values.');
+  lines.push('• Dry run above the part.');
+  lines.push('• Use single block and feed override for first proof.');
+  lines.push('• Follow instructor and shop procedures before running a machine.');
+  lines.push('');
+
+  lines.push('Keep checking the details. The goal is not just code that backplots, but code you can explain and prove out carefully.');
+  return lines.join('\n');
+}
+
+function buildReportSummaryHTML(report){
+  const review=getReviewedIssueData();
+  const includedIssues=review.included;
+  const removedIssues=review.ignored;
+  const sev=localSeverity(includedIssues);
+  const setupChecks=collectProgramSetupChecks();
+  const setupNeedsReview=setupChecks.filter(c=>!c.ok).length;
+  let html='<div class="clean-report">';
+  html+='<h3>Clean correction report generated</h3>';
+  html+='<div class="review-counts">';
+  html+=`<div class="count-card"><strong>Status</strong><span>${sev==='pass'?'PASS':sev==='caution'?'CAUTION':'STOP'}</span></div>`;
+  html+=`<div class="count-card"><strong>Included</strong><span>${includedIssues.length}</span></div>`;
+  html+=`<div class="count-card"><strong>Removed</strong><span>${removedIssues.length}</span></div>`;
+  html+='</div>';
+  html+=`<div class="local-summary"><strong>Setup checks needing review:</strong> ${setupNeedsReview}</div>`;
+  html+='</div>';
+
+  html+='<h3>Included issues used in report</h3>';
+  if (includedIssues.length){
+    html+=includedIssues.slice(0,10).map(e=>`<div class="issue ${sev}"><span class="line-tag">${escapeHTML(e.line || 'line ?')}</span>${escapeHTML(e.msg || '')}${e.suggestion?`<br><em>Suggested correction/check:</em> ${escapeHTML(e.suggestion)}`:''}${e.instructorNote?`<br><em>Note:</em> ${escapeHTML(e.instructorNote)}`:''}</div>`).join('');
+    if (includedIssues.length>10) html+=`<p class="mini-note">...and ${includedIssues.length-10} more included issue(s) in the report.</p>`;
+  } else {
+    html+='<div class="issue pass"><span class="line-tag">OK</span>No included local checker issues.</div>';
+  }
+
+  if (removedIssues.length){
+    html+='<h3>Removed false positives</h3>';
+    html+=removedIssues.slice(0,8).map(e=>`<div class="issue caution"><span class="line-tag">removed</span>${escapeHTML(e.line || 'line ?')}: ${escapeHTML(e.msg || '')}${e.instructorNote?`<br><em>Note:</em> ${escapeHTML(e.instructorNote)}`:''}</div>`).join('');
+    if (removedIssues.length>8) html+=`<p class="mini-note">...and ${removedIssues.length-8} more removed item(s).</p>`;
+  }
+
+  html+='<h3>Setup / safety checks</h3>';
+  html+=setupChecks.map(c=>`<div class="issue ${c.ok?'pass':'caution'}"><span class="line-tag">${c.ok?'OK':'CHECK'}</span>${escapeHTML(c.label)} — ${escapeHTML(c.note)}</div>`).join('');
+
+  html+=`<h3>Correction report</h3>`;
+  html+=`<p class="mini-note">Copy this text into your notes or Canvas comments. It is based only on included issues.</p>`;
+  html+=`<div class="assistant-actions">`+
+    `<button type="button" class="btn-ai" onclick="reviewIssuesForFixing()">Back to Issue Review</button>`+
+    `<button type="button" class="btn-ai" onclick="copyFixReport()">Copy Report to Clipboard</button>`+
+    `<button type="button" class="btn-secondary" onclick="downloadFixReport()">Download .txt</button>`+
+  `</div>`;
+  html+=`<textarea id="fixReportBox" class="prompt-box" spellcheck="false">${escapeHTML(report)}</textarea>`;
+  return html;
+}
+
+function updateSetupSummary(){
+  const el=document.getElementById('setupSummary');
+  if (!el) return;
+  const tools=collectToolsUsed();
+  const cz=document.getElementById('clearanceZ');
+  const minX=document.getElementById('stockMinX');
+  const maxX=document.getElementById('stockMaxX');
+  const minY=document.getElementById('stockMinY');
+  const maxY=document.getElementById('stockMaxY');
+  const hasStock=[minX,maxX,minY,maxY].every(input=>input && input.value !== '');
+  const stockText=hasStock ? `Stock X${minX.value}..${maxX.value} Y${minY.value}..${maxY.value}` : 'Stock not set';
+  el.innerHTML=`<span class="setup-chip">Clearance Z: ${escapeHTML(cz && cz.value ? cz.value : 'not set')}</span><span class="setup-chip">Tools: ${tools.length || document.querySelectorAll('#toolTableBody .tool-row').length}</span><span class="setup-chip">${escapeHTML(stockText)}</span>`;
+}
+
+
+function generateFixReport(){
+  setAssistantStatus('Building','working');
+  if (!moves.length && getProgramText().trim()) loadAndDraw();
+  if (errors.length && !document.querySelector('.issue-include')){
+    const sev=localSeverity();
+    setAssistantStatus(sev==='pass'?'PASS':sev==='caution'?'CAUTION':'STOP',sev);
+    setAssistantHTML(buildIssueReviewHTML());
+    return;
+  }
+  updateReviewCounts();
+  const report=buildFixReportText();
+  const sev=localSeverity(getIncludedIssues());
+  setAssistantStatus(sev==='pass'?'PASS':sev==='caution'?'CAUTION':'STOP',sev);
+  setAssistantHTML(buildReportSummaryHTML(report));
+}
+
+function ensureFixReportBox(){
+  let box=document.getElementById('fixReportBox');
+  if (!box){
+    generateFixReport();
+    box=document.getElementById('fixReportBox');
+  }
+  return box;
+}
+
+async function copyFixReport(){
+  const box=ensureFixReportBox();
+  if (!box) return;
+  box.focus();
+  box.select();
+  try{
+    await navigator.clipboard.writeText(box.value);
+    setAssistantStatus('Copied','pass');
+  }catch(err){
+    document.execCommand('copy');
+    setAssistantStatus('Copied','pass');
+  }
+}
+
+function downloadFixReport(){
+  const box=ensureFixReportBox();
+  if (!box) return;
+  const blob=new Blob([box.value],{type:'text/plain'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='mact-gcode-correction-report.txt';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); document.body.removeChild(a); },0);
+}
+
+/* ---------- Canvas & keyboard ---------- */
+
+let canvasEl=null;
+let isPanning=false;
+let lastX=0,lastY=0;
+
+function setupCanvasEvents(){
+  canvasEl=document.getElementById('canvas');
+  if (!canvasEl) return;
+
+  // Desktop/laptop wheel zoom.
+  canvasEl.addEventListener('wheel',(e)=>{
+    e.preventDefault();
+    const factor=(e.deltaY<0)?1.1:1/1.1;
+    view.zoom*=factor;
+    updateZoomLabel();
+    draw();
+  },{passive:false});
+
+  // Desktop mouse pan. Mobile touch pan/pinch is handled in setupCanvasTouchEvents().
+  canvasEl.addEventListener('mousedown',(e)=>{
+    isPanning=true;
+    lastX=e.clientX; lastY=e.clientY;
+    canvasEl.classList.add('panning');
+  });
+  window.addEventListener('mouseup',()=>{
+    isPanning=false;
+    if (canvasEl) canvasEl.classList.remove('panning');
+  });
+  window.addEventListener('mousemove',(e)=>{
+    if (!isPanning) return;
+    const dx=e.clientX-lastX;
+    const dy=e.clientY-lastY;
+    lastX=e.clientX; lastY=e.clientY;
+    view.offsetX+=dx;
+    view.offsetY+=dy;
+    draw();
+  });
+}
+
+// Mobile canvas support: one finger pans, two fingers pinch zoom.
+let touchState={active:false,lastX:0,lastY:0,lastDistance:null};
+
+function distanceBetweenTouches(touches){
+  if (!touches || touches.length<2) return null;
+  const dx=touches[0].clientX-touches[1].clientX;
+  const dy=touches[0].clientY-touches[1].clientY;
+  return Math.hypot(dx,dy);
+}
+
+function setupCanvasTouchEvents(){
+  const c=document.getElementById('canvas');
+  if (!c) return;
+
+  c.addEventListener('touchstart',(e)=>{
+    if (e.touches.length===1){
+      touchState.active=true;
+      touchState.lastX=e.touches[0].clientX;
+      touchState.lastY=e.touches[0].clientY;
+      touchState.lastDistance=null;
+      c.classList.add('panning');
+    } else if (e.touches.length===2){
+      touchState.active=false;
+      touchState.lastDistance=distanceBetweenTouches(e.touches);
+      c.classList.add('panning');
+    }
+  },{passive:false});
+
+  c.addEventListener('touchmove',(e)=>{
+    e.preventDefault();
+
+    if (e.touches.length===1 && touchState.active){
+      const x=e.touches[0].clientX;
+      const y=e.touches[0].clientY;
+      view.offsetX += x-touchState.lastX;
+      view.offsetY += y-touchState.lastY;
+      touchState.lastX=x;
+      touchState.lastY=y;
+      draw();
+      return;
+    }
+
+    if (e.touches.length===2){
+      const d=distanceBetweenTouches(e.touches);
+      if (d && touchState.lastDistance){
+        view.zoom *= d/touchState.lastDistance;
+        updateZoomLabel();
+        draw();
+      }
+      touchState.lastDistance=d;
+    }
+  },{passive:false});
+
+  c.addEventListener('touchend',(e)=>{
+    if (!c) return;
+    if (!e.touches || e.touches.length===0){
+      touchState.active=false;
+      touchState.lastDistance=null;
+      c.classList.remove('panning');
+    }
+  },{passive:false});
+}
+function setupKeyboard(){
+  window.addEventListener('keydown',(e)=>{
+    const tag=document.activeElement ? document.activeElement.tagName : '';
+    const isTyping=(tag==='INPUT'||tag==='TEXTAREA');
+    if (e.key==='Escape'){
+      // Easy exit: stop playback, close the setup dock, and leave the current edit field.
+      pausePlay();
+      const dock=document.getElementById('setupDock');
+      if (dock) dock.open=false;
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      return;
+    }
+    if (isTyping) return;
+    if (e.key===' '){
+      e.preventDefault();
+      if (isPlaying) pausePlay(); else startPlay();
+    } else if (e.key==='ArrowRight'){
+      e.preventDefault(); stepOnce();
+    } else if (e.key==='ArrowLeft'){
+      e.preventDefault(); stepBack();
+    } else if (e.key==='+'||e.key==='='){
+      e.preventDefault(); zoomIn();
+    } else if (e.key==='-'||e.key==='_'){
+      e.preventDefault(); zoomOut();
+    } else if (e.key==='f'||e.key==='F'){
+      e.preventDefault(); resetView();
+    } else if (e.key==='e'||e.key==='E'){
+      e.preventDefault(); jumpToNextError();
+    }
+  });
+}
+function setupSpeedSlider(){
+  const slider=document.getElementById('speedSlider');
+  const label=document.getElementById('speedLabel');
+  if (!slider || !label) return;
+  speedFactor=parseFloat(slider.value)||1.0;
+  label.textContent=`${speedFactor.toFixed(2)}x`;
+  slider.addEventListener('input',()=>{
+    speedFactor=parseFloat(slider.value)||1.0;
+    label.textContent=`${speedFactor.toFixed(2)}x`;
+  });
+}
+
+// Redraw after window resize/orientation change. requestAnimationFrame avoids extra work during rapid resizing.
+window.addEventListener('resize',()=>requestAnimationFrame(draw));
+window.addEventListener('orientationchange',()=>setTimeout(draw,250));
+
+/* ---------- Init ---------- */
+
+window.addEventListener('load',()=>{
+  setupCanvasEvents();
+  setupCanvasTouchEvents();
+  setupScrubBar();
+  setupKeyboard();
+  setupSpeedSlider();
+  updateZoomLabel();
+
+  const cbM0=document.getElementById('pauseM0');
+  const cbM1=document.getElementById('pauseM1');
+  const cbLoop=document.getElementById('loopPlayback');
+  const cbDys=document.getElementById('useDyslexic');
+  const cbHC =document.getElementById('highContrast');
+  const prog=document.getElementById('program');
+  const fileInput=document.getElementById('fileInput');
+
+  if (cbM0){ pauseOnM0=cbM0.checked; cbM0.addEventListener('change',()=>pauseOnM0=cbM0.checked); }
+  if (cbM1){ pauseOnM1=cbM1.checked; cbM1.addEventListener('change',()=>pauseOnM1=cbM1.checked); }
+  if (cbLoop){
+    loopPlayback=cbLoop.checked;
+    cbLoop.addEventListener('change',()=>{ loopPlayback=cbLoop.checked; });
+  }
+  if (cbDys){
+    cbDys.addEventListener('change',()=>{
+      if (cbDys.checked) document.body.classList.add('dyslexic');
+      else document.body.classList.remove('dyslexic');
+    });
+  }
+  if (cbHC){
+    cbHC.addEventListener('change',()=>{
+      if (cbHC.checked) document.body.classList.add('highContrast');
+      else document.body.classList.remove('highContrast');
+      draw();
+    });
+  }
+  if (prog){
+    prog.addEventListener('click',jumpToLineUnderCursor);
+    prog.addEventListener('keyup',jumpToLineUnderCursor);
+  }
+  if (fileInput){
+    fileInput.addEventListener('change',handleFileSelected);
+  }
+
+  loadAndDraw();
+});
+
+// Keep compact setup summary current while editing.
+document.addEventListener('input', function(evt){
+  if (evt.target && evt.target.closest && evt.target.closest('#setupDock')) updateSetupSummary();
+});
+window.addEventListener('load', updateSetupSummary);
+
+</script>
+</body>
+</html>
