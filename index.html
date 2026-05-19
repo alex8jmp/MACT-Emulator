@@ -1177,11 +1177,11 @@ M30
 
       <div class="panel assistant-panel" id="assistantPanel">
         <div class="assistant-header">
-          <strong>Student Code Review Report</strong>
+          <strong>CNC Mill Code Editor and Emulator</strong>
           <span id="assistantStatus">Ready</span>
         </div>
-        <div class="assistant-small">Student-facing code review aid. The local checker flags possible issues; you still need to verify the code and make corrections carefully.</div>
-        <div id="assistantOutput" style="margin-top:8px;">Run <strong>Review Issues</strong> first. Check or uncheck false positives, then generate a correction report. This version stays single-file and does not send data anywhere.</div>
+        <div class="assistant-small">The checker flags possible issues. You still need to verify the code and make corrections </div>
+        <div id="assistantOutput" style="margin-top:8px;">Run <strong>Review Issues</strong> first. Check or uncheck false positives, then generate a correction report.</div>
       </div>
     </div>
 
@@ -2873,7 +2873,7 @@ function removeLineNumbers(){
 }
 
 
-/* ---------- Student code review report: no-server mode ---------- */
+/* ---------- G-Code review report ---------- */
 
 function getCursorLineIndex(){
   const ta=document.getElementById('program');
@@ -3010,8 +3010,6 @@ function getManualField(id, fallback=''){
 function buildIssueReviewHTML(){
   const sev = localSeverity();
   let html='<div class="local-summary">';
-  html+=`<strong>Local only:</strong> This checker runs in the browser. Nothing is sent out.<br>`;
-  html+=`<strong>Step 1:</strong> include real issues and remove false positives. <strong>Step 2:</strong> generate a clean correction report.<br>`;
   html+=`<strong>Status:</strong> ${sev==='pass'?'PASS':sev==='caution'?'CAUTION':'STOP'} &nbsp; <strong>Raw flags:</strong> ${errors.length} &nbsp; <strong>Moves:</strong> ${moves.length} &nbsp; <strong>Units:</strong> ${escapeHTML(detectUnits())}`;
   html+='</div>';
   html+='<h3>Step 1 — Include / remove issue flags</h3>';
@@ -3177,7 +3175,6 @@ function buildFixReportText(){
   lines.push('• Follow instructor and shop procedures before running a machine.');
   lines.push('');
 
-  lines.push('Keep checking the details. The goal is not just code that backplots, but code you can explain and prove out carefully.');
   return lines.join('\n');
 }
 
