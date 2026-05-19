@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <!-- Mobile viewport: required so phones use the real device width instead of a desktop-sized virtual page. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>SDCC MACT Emulator - v0.1.5.2s </title>
+  <title>SDCC MACT Emulator - v0.1.5.3s </title>
 
   <!--
     ============================================================
@@ -281,6 +281,85 @@
       flex-direction:column;
       gap:4px;
     }
+
+    /*
+      Program editor mode controls.
+      Edit Mode prevents the editor from moving the playback cursor while typing.
+      Live Verify Mode restores line-pick behavior and playback line highlighting.
+    */
+    .program-heading {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .program-title {
+      min-width:220px;
+      flex:1 1 260px;
+      line-height:1.35;
+    }
+    .program-title small {
+      display:block;
+      margin-top:2px;
+      color:#cbd5e1;
+      font-size:11px;
+      line-height:1.35;
+    }
+    .editor-mode-controls {
+      display:inline-flex;
+      flex:0 0 auto;
+      gap:4px;
+      padding:3px;
+      border:1px solid #334155;
+      border-radius:999px;
+      background:rgba(2,6,23,0.55);
+    }
+    .editor-mode-controls .mode-toggle-btn {
+      min-height:30px;
+      padding:4px 9px;
+      font-size:12px;
+      border-color:transparent;
+      background:transparent;
+      color:#dbeafe;
+    }
+    .editor-mode-controls .mode-toggle-btn.active {
+      background:#ffd447;
+      color:#111827;
+      border-color:#a16207;
+      box-shadow:0 0 0 1px rgba(255,212,71,.25);
+    }
+    .editor-mode-note {
+      margin:2px 0 4px;
+      padding:5px 7px;
+      border:1px solid #334155;
+      border-radius:8px;
+      background:rgba(2,6,23,0.45);
+      color:#cbd5e1;
+      font-size:12px;
+      line-height:1.35;
+      white-space:normal;
+    }
+    body.editMode #program {
+      border-color:#14b8a6;
+    }
+    body.liveVerifyMode #program {
+      border-color:#ffd447;
+      box-shadow:0 0 0 1px rgba(255,212,71,.32);
+    }
+    body.highContrast .program-title small,
+    body.highContrast .editor-mode-note {
+      color:#000000;
+    }
+    body.highContrast .editor-mode-note {
+      background:#ffffff;
+      border-color:#000000;
+    }
+    body.highContrast .editor-mode-controls {
+      background:#ffffff;
+      border-color:#000000;
+    }
+
     .info-panel {
       flex:0 0 120px;
       min-height:90px;
@@ -965,6 +1044,18 @@
       #canvas {
         min-height:260px;
       }
+
+      .program-heading {
+        display:grid;
+        grid-template-columns:1fr;
+      }
+      .editor-mode-controls {
+        width:100%;
+        box-sizing:border-box;
+      }
+      .editor-mode-controls .mode-toggle-btn {
+        flex:1 1 50%;
+      }
       .assistant-header {
         align-items:flex-start;
       }
@@ -982,7 +1073,7 @@
   
   <!-- TOP COMMAND BAR: buttons, speed control, and accessibility toggles. -->
   <div id="topBar">
-    <span class="brand">SDCC MACT Emulator v0.1.5.2 — Student Code Review Report</span>
+    <span class="brand">SDCC MACT Emulator v0.1.5.3 — Student Code Review Report</span>
 
     <div class="top-group">
       <button type="button" class="btn-load" onclick="loadAndDraw()">Load &amp; Draw</button>
@@ -1044,7 +1135,17 @@
     <!-- LEFT PANEL: program editor, parser info, and student code review report. -->
     <div id="left">
       <div class="panel program-panel">
-        <div><strong>Program</strong> (click a line to jump)</div>
+        <div class="program-heading">
+          <div class="program-title">
+                    <strong>Page Editor</strong>
+            <small id="editorModeHelp">Edit Mode is on: type or paste freely. Switch to Live Verify to click a line and jump the backplot.</small>
+          </div>
+          <div class="editor-mode-controls" role="group" aria-label="G-code editor mode">
+            <button type="button" id="editModeBtn" class="mode-toggle-btn active" onclick="setEditorMode('edit')" aria-pressed="true">Edit Mode</button>
+            <button type="button" id="liveVerifyModeBtn" class="mode-toggle-btn" onclick="setEditorMode('live')" aria-pressed="false">Live Verify Mode</button>
+          </div>
+        </div>
+        <div class="editor-mode-note" id="editorModeStatus">Edit Mode: the editor will not move the playback cursor while you type. Use Load & Draw when you are ready to check the code.</div>
         <textarea id="program">%
 O1500 (SDCC MACT CENTERLINE 4 TOOLS)
 (HAAS AND FADAL VMC FRIENDLY)
@@ -1332,6 +1433,7 @@ let loopPlayback = false;
 
 const baseInterval = 140;
 let speedFactor = 1.0;
+let editorMode = 'edit';
 
 /* ---------- Tool & stock helpers ----------
    These functions read the Stock & Tools panel and auto-add tool rows
@@ -2702,11 +2804,67 @@ function jumpToNextError(){
   draw();
 }
 
+
+/* ---------- Program editor mode ----------
+   Edit Mode is for typing/pasting without the emulator selecting lines.
+   Live Verify Mode is for clicking a program line to jump the backplot.
+---------- */
+
+function isLiveVerifyMode(){
+  return editorMode === 'live';
+}
+
+function setEditorMode(mode){
+  editorMode = (mode === 'live') ? 'live' : 'edit';
+  document.body.classList.toggle('liveVerifyMode', editorMode === 'live');
+  document.body.classList.toggle('editMode', editorMode === 'edit');
+  updateEditorModeUI();
+
+  // Leaving Live Verify clears any selected program text so editing feels normal again.
+  if (editorMode === 'edit') {
+    const ta = document.getElementById('program');
+    if (ta && document.activeElement === ta) {
+      const pos = ta.selectionEnd || ta.selectionStart || 0;
+      try { ta.setSelectionRange(pos, pos); } catch(e) {}
+    }
+  }
+}
+
+function updateEditorModeUI(){
+  const editBtn = document.getElementById('editModeBtn');
+  const liveBtn = document.getElementById('liveVerifyModeBtn');
+  const help = document.getElementById('editorModeHelp');
+  const status = document.getElementById('editorModeStatus');
+
+  if (editBtn) {
+    editBtn.classList.toggle('active', editorMode === 'edit');
+    editBtn.setAttribute('aria-pressed', editorMode === 'edit' ? 'true' : 'false');
+  }
+  if (liveBtn) {
+    liveBtn.classList.toggle('active', editorMode === 'live');
+    liveBtn.setAttribute('aria-pressed', editorMode === 'live' ? 'true' : 'false');
+  }
+
+  if (editorMode === 'live') {
+    if (help) help.textContent = 'Live Verify Mode is on: click a program line to jump the backplot; playback may highlight the active line.';
+    if (status) status.textContent = 'Live Verify Mode: clicking or moving through the program can change the selected move. Switch back to Edit Mode before heavy typing.';
+  } else {
+    if (help) help.textContent = 'Edit Mode is on: type or paste freely. Switch to Live Verify to click a line and jump the backplot.';
+    if (status) status.textContent = 'Edit Mode: the editor will not move the playback cursor while you type. Use Load & Draw when you are ready to check the code.';
+  }
+}
+
+function handleProgramEditorJump(){
+  if (!isLiveVerifyMode()) return;
+  jumpToLineUnderCursor();
+}
+
 /* ---------- Program text sync ---------- */
 
 function highlightProgramLine(lineIndex){
   const ta=document.getElementById('program');
   if (!ta) return;
+  if (!isLiveVerifyMode()) return;
   const text=ta.value;
   const lines=text.split('\n');
   if (lineIndex<0 || lineIndex>=lines.length) return;
@@ -2723,6 +2881,7 @@ function highlightProgramLine(lineIndex){
 }
 
 function jumpToLineUnderCursor(){
+  if (!isLiveVerifyMode()) return;
   if (!moves.length) return;
   const ta=document.getElementById('program');
   if (!ta) return;
@@ -3061,6 +3220,8 @@ function updateReviewCounts(){
 
 function reviewIssuesForFixing(){
   setAssistantStatus('Checking','working');
+  setEditorMode('edit');
+
   loadAndDraw();
   const sev=localSeverity();
   setAssistantStatus(sev==='pass'?'PASS':sev==='caution'?'CAUTION':'STOP',sev);
@@ -3477,8 +3638,8 @@ window.addEventListener('load',()=>{
     });
   }
   if (prog){
-    prog.addEventListener('click',jumpToLineUnderCursor);
-    prog.addEventListener('keyup',jumpToLineUnderCursor);
+    prog.addEventListener('click',handleProgramEditorJump);
+    prog.addEventListener('keyup',handleProgramEditorJump);
   }
   if (fileInput){
     fileInput.addEventListener('change',handleFileSelected);
