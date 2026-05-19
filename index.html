@@ -17,8 +17,7 @@
     QUICK EDIT MAP
     1. PAGE COLORS / SPACING:
        - Start in the CSS :root block below.
-       - Main colors still use the original MACT dark theme, but common sizing values are grouped there.
-
+    
     2. PAGE LAYOUT:
        - #topBar is the command area.
        - #main holds the two main work zones.
@@ -26,7 +25,7 @@
        - #right holds Canvas, Scrub bar, Stock, and Tool table.
 
     3. MOBILE BEHAVIOR:
-       - Search for "MOBILE RESPONSIVE RULES" in the CSS.
+       - "MOBILE RESPONSIVE RULES" in the CSS.
        - The desktop two-column layout becomes a stacked phone layout.
        - The top command bar scrolls instead of pushing the drawing area off screen.
        - The canvas supports touch panning and pinch zoom.
@@ -42,8 +41,7 @@
        - Press Escape to pause playback, blur the active input/textarea, and collapse the Stock & Tools panel.
        - This makes it easier to get out of edit fields on small screens.
 
-    This is still a single-file HTML tool. No server and no external JavaScript are required.
-  -->
+    -->
   <style>
 
     /*
@@ -51,8 +49,7 @@
       EDITABLE DESIGN TOKENS
       ============================================================
       Change these values first when adjusting mobile sizing, spacing,
-      or the overall MACT visual feel. Many legacy colors remain below
-      so the original theme is preserved, but these tokens control the
+      or the overall MACT visual feel. These tokens control the
       responsive shell and touch targets.
     */
     :root {
@@ -982,7 +979,7 @@
   </style>
 </head>
 <body>
-  <!-- VERSION NOTE: Student-facing file. This version keeps code review/reporting tools but removes AI prompt tools and grade/point values. -->
+  
   <!-- TOP COMMAND BAR: buttons, speed control, and accessibility toggles. -->
   <div id="topBar">
     <span class="brand">SDCC MACT Emulator v0.1.5.2 — Student Code Review Report</span>
@@ -3124,7 +3121,7 @@ function buildFixReportText(){
       if (e.instructorNote) lines.push('   • Note: '+e.instructorNote);
     });
   } else {
-    lines.push('• No included local checker issues. Continue with simulation, setup verification, and instructor/shop requirements.');
+    lines.push('• No issues found. Continue with code simulation on standalone controllers before milling.');
   }
   lines.push('');
 
@@ -3168,11 +3165,10 @@ function buildFixReportText(){
   }
 
   lines.push('Verification Steps');
-  lines.push('• Backplot / simulate the corrected program.');
+  lines.push('• Backplot / simulate the corrected program on standalone controller.');
+  lines.push('• Check with instructor before running on machine.');
   lines.push('• Confirm work offset, tool length offset, and tool diameter values.');
-  lines.push('• Dry run above the part.');
-  lines.push('• Use single block and feed override for first proof.');
-  lines.push('• Follow instructor and shop procedures before running a machine.');
+  lines.push('• Use single block and feed override for first run.');
   lines.push('');
 
   return lines.join('\n');
