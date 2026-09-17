@@ -226,12 +226,52 @@
       opacity:0.8;
     }
 
-    /* Main app layout. Desktop uses two columns; mobile stacks left/right panels. */
+    /* Main app layout. Desktop uses left pane + draggable divider + right pane.
+       Mobile stacks left/right panels and hides the divider. */
     #main {
       flex: 1 1 auto;
       display:grid;
-      grid-template-columns:minmax(420px, 42vw) minmax(0, 1fr);
+      grid-template-columns:minmax(320px, var(--mact-left-pane-width, 42vw)) 10px minmax(0, 1fr);
       min-height:0;
+    }
+
+    /* Draggable desktop divider between the editor/report column and backplot column. */
+    #columnResizer {
+      position:relative;
+      min-width:10px;
+      width:10px;
+      cursor:col-resize;
+      touch-action:none;
+      background:#0b1020;
+      outline:none;
+    }
+    #columnResizer::before {
+      content:'';
+      position:absolute;
+      top:10px;
+      bottom:10px;
+      left:50%;
+      width:3px;
+      transform:translateX(-50%);
+      border-radius:999px;
+      background:#334155;
+      transition:background .15s ease, width .15s ease;
+    }
+    #columnResizer:hover::before,
+    #columnResizer:focus-visible::before,
+    #columnResizer.dragging::before {
+      width:5px;
+      background:#38bdf8;
+    }
+    body.resizing-columns {
+      cursor:col-resize;
+      user-select:none;
+    }
+    body.highContrast #columnResizer {
+      background:#ffffff;
+    }
+    body.highContrast #columnResizer::before {
+      background:#000000;
     }
 
     /* Left work column: program editor, parser info, and report panel. */
@@ -363,13 +403,57 @@
     .info-panel {
       flex:0 0 120px;
       min-height:90px;
-      overflow:auto;
       font-size:12px;
     }
     .assistant-panel {
       flex:0 0 300px;
       min-height:220px;
+    }
+
+    /* Collapsible Info and Assistant panels. The header remains visible when collapsed. */
+    .collapsible-panel {
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      white-space:normal;
+      transition:flex-basis .16s ease, min-height .16s ease;
+    }
+    .panel-collapse-header {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      flex:0 0 auto;
+      margin-bottom:5px;
+    }
+    .panel-collapse-body {
+      flex:1 1 auto;
+      min-height:0;
       overflow:auto;
+    }
+    .info-panel .panel-collapse-body {
+      white-space:pre-wrap;
+    }
+    .panel-collapse-btn {
+      flex:0 0 auto;
+      min-height:28px;
+      padding:3px 9px;
+      font-size:11px;
+      background:#111827;
+      border-color:#475569;
+      color:#e5e7eb;
+    }
+    .collapsible-panel.collapsed {
+      flex:0 0 48px !important;
+      min-height:48px !important;
+      overflow:hidden !important;
+    }
+    .collapsible-panel.collapsed .panel-collapse-body {
+      display:none;
+    }
+    .collapsible-panel.collapsed .panel-collapse-header,
+    .collapsible-panel.collapsed .assistant-header {
+      margin-bottom:0;
     }
 
     /* Text editors: program box plus generated report/prompt boxes. */
@@ -529,7 +613,7 @@
     .assistant-panel {
       flex:0 1 30%;
       min-height:150px;
-      overflow:auto;
+      overflow:hidden;
       border-color:#0f766e;
       background:linear-gradient(180deg,#10253a,#111827);
     }
@@ -539,6 +623,13 @@
       justify-content:space-between;
       gap:8px;
       margin-bottom:6px;
+      flex:0 0 auto;
+    }
+    .assistant-header-actions {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex:0 0 auto;
     }
     .assistant-small {
       font-size:11px;
@@ -888,7 +979,7 @@
     /* Tablet and small laptop: tighten the shell before switching to phone layout. */
     @media (max-width: 1180px) {
       #main {
-        grid-template-columns:minmax(360px, 44vw) minmax(0, 1fr);
+        grid-template-columns:minmax(340px, var(--mact-left-pane-width, 44vw)) 10px minmax(0, 1fr);
       }
       .tool-grid.compact {
         grid-template-columns:1fr;
@@ -939,6 +1030,9 @@
         min-height:0;
         overflow:visible;
       }
+      #columnResizer {
+        display:none;
+      }
       #left {
         width:100%;
         border-right:none;
@@ -965,6 +1059,12 @@
         flex:0 0 auto;
         min-height:90px;
         max-height:160px;
+      }
+      .assistant-panel.collapsed,
+      .info-panel.collapsed {
+        flex:0 0 48px !important;
+        min-height:48px !important;
+        max-height:48px !important;
       }
       textarea {
         min-height:180px;
@@ -1271,17 +1371,48 @@ M30
         </div>
       </div>
 
-      <div class="panel info-panel" id="info"></div>
+      <div class="panel info-panel collapsible-panel" id="infoPanel">
+        <div class="panel-collapse-header">
+          <strong>Program Info</strong>
+          <button type="button"
+                  class="panel-collapse-btn"
+                  data-panel-toggle="infoPanel"
+                  aria-controls="infoPanelBody"
+                  aria-expanded="true">Collapse</button>
+        </div>
+        <div class="panel-collapse-body" id="infoPanelBody">
+          <div id="info"></div>
+        </div>
+      </div>
 
-      <div class="panel assistant-panel" id="assistantPanel">
+      <div class="panel assistant-panel collapsible-panel" id="assistantPanel">
         <div class="assistant-header">
           <strong>CNC Mill Code Editor and Emulator</strong>
-          <span id="assistantStatus">Ready</span>
+          <div class="assistant-header-actions">
+            <span id="assistantStatus">Ready</span>
+            <button type="button"
+                    class="panel-collapse-btn"
+                    data-panel-toggle="assistantPanel"
+                    aria-controls="assistantPanelBody"
+                    aria-expanded="true">Collapse</button>
+          </div>
         </div>
-        <div class="assistant-small">The checker flags possible issues. You still need to verify the code and make corrections </div>
-        <div id="assistantOutput" style="margin-top:8px;">Run <strong>Review Issues</strong> first. Check or uncheck false positives, then generate a correction report.</div>
+        <div class="panel-collapse-body" id="assistantPanelBody">
+          <div class="assistant-small">The checker flags possible issues. You still need to verify the code and make corrections </div>
+          <div id="assistantOutput" style="margin-top:8px;">Run <strong>Review Issues</strong> first. Check or uncheck false positives, then generate a correction report.</div>
+        </div>
       </div>
     </div>
+
+    <!-- Desktop resize handle. Drag it left/right; double-click to reset. -->
+    <div id="columnResizer"
+         role="separator"
+         aria-label="Resize editor and backplot columns"
+         aria-orientation="vertical"
+         aria-valuemin="320"
+         aria-valuenow="0"
+         tabindex="0"
+         title="Drag to resize. Double-click to reset."></div>
 
     <!-- RIGHT PANEL: visual backplot, scrub bar, stock, and tool table. -->
     <div id="right">
@@ -3451,6 +3582,177 @@ function downloadFixReport(){
   setTimeout(()=>{ URL.revokeObjectURL(a.href); document.body.removeChild(a); },0);
 }
 
+/* ---------- Resizable / collapsible layout ---------- */
+
+const layoutStorageKeys = {
+  leftWidth: 'mact-emulator-left-pane-width',
+  infoCollapsed: 'mact-emulator-info-collapsed',
+  assistantCollapsed: 'mact-emulator-assistant-collapsed'
+};
+
+function safeStorageGet(key){
+  try { return window.localStorage.getItem(key); }
+  catch (err) { return null; }
+}
+
+function safeStorageSet(key,value){
+  try { window.localStorage.setItem(key,String(value)); }
+  catch (err) { /* Local files/private browsing may block storage. */ }
+}
+
+function isStackedLayout(){
+  return window.matchMedia('(max-width: 980px)').matches;
+}
+
+function getLeftPaneLimits(){
+  const main=document.getElementById('main');
+  const resizer=document.getElementById('columnResizer');
+  if (!main) return {min:320,max:900};
+  const total=main.getBoundingClientRect().width;
+  const divider=resizer ? resizer.getBoundingClientRect().width : 10;
+  const minLeft=window.innerWidth<=1180 ? 340 : 320;
+  const minRight=360;
+  return {
+    min:minLeft,
+    max:Math.max(minLeft, total-divider-minRight)
+  };
+}
+
+function setLeftPaneWidth(px,persist=true){
+  const main=document.getElementById('main');
+  const resizer=document.getElementById('columnResizer');
+  if (!main || !Number.isFinite(px)) return;
+
+  const limits=getLeftPaneLimits();
+  const clamped=Math.max(limits.min,Math.min(limits.max,px));
+  main.style.setProperty('--mact-left-pane-width',`${clamped}px`);
+
+  if (resizer){
+    resizer.setAttribute('aria-valuemin',String(Math.round(limits.min)));
+    resizer.setAttribute('aria-valuemax',String(Math.round(limits.max)));
+    resizer.setAttribute('aria-valuenow',String(Math.round(clamped)));
+  }
+
+  if (persist) safeStorageSet(layoutStorageKeys.leftWidth,Math.round(clamped));
+  requestAnimationFrame(draw);
+}
+
+function resetLeftPaneWidth(){
+  const main=document.getElementById('main');
+  if (!main) return;
+  const ratio=window.innerWidth<=1180 ? 0.44 : 0.42;
+  const width=main.getBoundingClientRect().width*ratio;
+  setLeftPaneWidth(width,true);
+}
+
+function clampStoredLeftPaneWidth(){
+  if (isStackedLayout()) return;
+  const main=document.getElementById('main');
+  if (!main) return;
+  const current=parseFloat(getComputedStyle(main).getPropertyValue('--mact-left-pane-width'));
+  if (Number.isFinite(current)) setLeftPaneWidth(current,false);
+}
+
+function setupColumnResizer(){
+  const resizer=document.getElementById('columnResizer');
+  const main=document.getElementById('main');
+  if (!resizer || !main) return;
+
+  const stored=parseFloat(safeStorageGet(layoutStorageKeys.leftWidth));
+  if (Number.isFinite(stored)) setLeftPaneWidth(stored,false);
+  else resetLeftPaneWidth();
+
+  let dragging=false;
+
+  resizer.addEventListener('pointerdown',(e)=>{
+    if (isStackedLayout()) return;
+    dragging=true;
+    document.body.classList.add('resizing-columns');
+    resizer.classList.add('dragging');
+    if (resizer.setPointerCapture) resizer.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  resizer.addEventListener('pointermove',(e)=>{
+    if (!dragging || isStackedLayout()) return;
+    const rect=main.getBoundingClientRect();
+    setLeftPaneWidth(e.clientX-rect.left,false);
+  });
+
+  const finishDrag=(e)=>{
+    if (!dragging) return;
+    dragging=false;
+    document.body.classList.remove('resizing-columns');
+    resizer.classList.remove('dragging');
+    const width=parseFloat(getComputedStyle(main).getPropertyValue('--mact-left-pane-width'));
+    if (Number.isFinite(width)) safeStorageSet(layoutStorageKeys.leftWidth,Math.round(width));
+    if (e && resizer.releasePointerCapture && resizer.hasPointerCapture && resizer.hasPointerCapture(e.pointerId)){
+      resizer.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  resizer.addEventListener('pointerup',finishDrag);
+  resizer.addEventListener('pointercancel',finishDrag);
+  resizer.addEventListener('dblclick',resetLeftPaneWidth);
+
+  resizer.addEventListener('keydown',(e)=>{
+    if (isStackedLayout()) return;
+    const current=parseFloat(getComputedStyle(main).getPropertyValue('--mact-left-pane-width')) ||
+                  document.getElementById('left').getBoundingClientRect().width;
+    let next=current;
+
+    if (e.key==='ArrowLeft') next=current-(e.shiftKey?64:24);
+    else if (e.key==='ArrowRight') next=current+(e.shiftKey?64:24);
+    else if (e.key==='Home') next=getLeftPaneLimits().min;
+    else if (e.key==='End') next=getLeftPaneLimits().max;
+    else return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    setLeftPaneWidth(next,true);
+  });
+}
+
+function setPanelCollapsed(panelId,collapsed,persist=true){
+  const panel=document.getElementById(panelId);
+  if (!panel) return;
+
+  panel.classList.toggle('collapsed',collapsed);
+  const button=panel.querySelector('[data-panel-toggle]');
+  if (button){
+    button.textContent=collapsed ? 'Expand' : 'Collapse';
+    button.setAttribute('aria-expanded',String(!collapsed));
+  }
+
+  if (persist){
+    const key=panelId==='infoPanel' ? layoutStorageKeys.infoCollapsed : layoutStorageKeys.assistantCollapsed;
+    safeStorageSet(key,collapsed ? '1' : '0');
+  }
+
+  requestAnimationFrame(draw);
+}
+
+function setupCollapsiblePanels(){
+  [
+    ['infoPanel',layoutStorageKeys.infoCollapsed],
+    ['assistantPanel',layoutStorageKeys.assistantCollapsed]
+  ].forEach(([panelId,key])=>{
+    const panel=document.getElementById(panelId);
+    if (!panel) return;
+    const collapsed=safeStorageGet(key)==='1';
+    setPanelCollapsed(panelId,collapsed,false);
+  });
+
+  document.querySelectorAll('[data-panel-toggle]').forEach(button=>{
+    button.addEventListener('click',()=>{
+      const panelId=button.getAttribute('data-panel-toggle');
+      const panel=document.getElementById(panelId);
+      if (!panel) return;
+      setPanelCollapsed(panelId,!panel.classList.contains('collapsed'),true);
+    });
+  });
+}
+
 /* ---------- Canvas & keyboard ---------- */
 
 let canvasEl=null;
@@ -3596,9 +3898,15 @@ function setupSpeedSlider(){
   });
 }
 
-// Redraw after window resize/orientation change. requestAnimationFrame avoids extra work during rapid resizing.
-window.addEventListener('resize',()=>requestAnimationFrame(draw));
-window.addEventListener('orientationchange',()=>setTimeout(draw,250));
+// Redraw and keep the resized left pane inside usable limits after viewport changes.
+window.addEventListener('resize',()=>requestAnimationFrame(()=>{
+  clampStoredLeftPaneWidth();
+  draw();
+}));
+window.addEventListener('orientationchange',()=>setTimeout(()=>{
+  clampStoredLeftPaneWidth();
+  draw();
+},250));
 
 /* ---------- Init ---------- */
 
@@ -3608,6 +3916,8 @@ window.addEventListener('load',()=>{
   setupScrubBar();
   setupKeyboard();
   setupSpeedSlider();
+  setupColumnResizer();
+  setupCollapsiblePanels();
   updateZoomLabel();
 
   const cbM0=document.getElementById('pauseM0');
