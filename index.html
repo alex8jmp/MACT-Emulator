@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <!-- Mobile viewport: required so phones use the real device width instead of a desktop-sized virtual page. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>SDCC MACT Emulator - v0.1.5.3s </title>
+  <title>SDCC MACT Emulator - v0.2.0-alpha.1 </title>
 
   <!--
     ============================================================
@@ -162,6 +162,27 @@
       color: var(--mact-highlight);
       margin-right:12px;
       line-height:1.25;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .alpha-badge {
+      display:inline-flex;
+      align-items:center;
+      border:1px solid #0f766e;
+      background:#103b3a;
+      color:#99f6e4;
+      border-radius:999px;
+      padding:2px 8px;
+      font-size:10px;
+      letter-spacing:.06em;
+      font-weight:800;
+    }
+    body.highContrast .alpha-badge {
+      background:#ffffff;
+      color:#000000;
+      border-color:#000000;
     }
     .top-group {
       display:flex;
@@ -1173,7 +1194,7 @@
   
   <!-- TOP COMMAND BAR: buttons, speed control, and accessibility toggles. -->
   <div id="topBar">
-    <span class="brand">SDCC MACT Emulator v0.1.5.3 — Student Code Review Report</span>
+    <span class="brand">SDCC MACT Emulator v0.2.0-alpha.1 — Expanded Haas G-Code Fork <span class="alpha-badge">107 G-CODES</span></span>
 
     <div class="top-group">
       <button type="button" class="btn-load" onclick="loadAndDraw()">Load &amp; Draw</button>
@@ -1498,6 +1519,22 @@ M30
           </div>
         </div>
       </details>
+
+      <details class="panel setup-dock" id="alphaSupportDock">
+        <summary>
+          <strong>Alpha G-Code Coverage</strong>
+          <span class="setup-summary">
+            <span class="setup-chip">107 requested codes</span>
+            <span class="setup-chip">Visual + tracked</span>
+          </span>
+        </summary>
+        <div class="setup-dock-body" style="font-size:12px; line-height:1.45;">
+          <div><strong>Visual</strong> — motion/modal behavior is backplotted or directly represented.</div>
+          <div style="margin-top:4px;"><strong>Approx</strong> — the command is parsed and shown with a safe 3-axis approximation.</div>
+          <div style="margin-top:4px;"><strong>Tracked</strong> — controller/hardware state is recognized without pretending to reproduce unavailable machine behavior.</div>
+          <div id="alphaCoverageList" style="margin-top:8px; max-height:170px; overflow:auto;"></div>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -1705,9 +1742,492 @@ function addToolLength(tool, len) {
    Add or remove G/M codes here only when you want to change checker rules.
 ---------- */
 
+const HAAS_GCODE_ALPHA = new Map([
+  [0, {name:"Rapid Motion Positioning", level:"visual"}],
+  [1, {name:"Linear Interpolation Motion", level:"visual"}],
+  [2, {name:"Circular Interpolation Motion CW", level:"visual"}],
+  [3, {name:"Circular Interpolation Motion CCW", level:"visual"}],
+  [4, {name:"Dwell", level:"visual"}],
+  [9, {name:"Exact Stop", level:"visual"}],
+  [10, {name:"Set Offsets", level:"visual"}],
+  [12, {name:"Circular Pocket Milling CW", level:"visual"}],
+  [13, {name:"Circular Pocket Milling CCW", level:"visual"}],
+  [17, {name:"XY Plane Selection", level:"visual"}],
+  [18, {name:"XZ Plane Selection", level:"visual"}],
+  [19, {name:"YZ Plane Selection", level:"visual"}],
+  [20, {name:"Select Inches", level:"visual"}],
+  [21, {name:"Select Metric", level:"visual"}],
+  [28, {name:"Return To Machine Zero Point", level:"visual"}],
+  [29, {name:"Return From Reference Point", level:"visual"}],
+  [31, {name:"Feed Until Skip", level:"approx"}],
+  [35, {name:"Automatic Tool Diameter Measurement", level:"approx"}],
+  [36, {name:"Automatic Work Offset Measurement", level:"approx"}],
+  [37, {name:"Automatic Tool Offset Measurement", level:"approx"}],
+  [40, {name:"Cutter Compensation Cancel", level:"visual"}],
+  [41, {name:"2D Cutter Compensation Left", level:"visual"}],
+  [42, {name:"2D Cutter Compensation Right", level:"visual"}],
+  [43, {name:"Tool Length Compensation + (Add)", level:"visual"}],
+  [44, {name:"Tool Length Compensation - (Subtract)", level:"visual"}],
+  [47, {name:"Text Engraving", level:"approx"}],
+  [49, {name:"G43/G44/G143 Cancel", level:"visual"}],
+  [50, {name:"Cancel Scaling", level:"visual"}],
+  [51, {name:"Scaling", level:"visual"}],
+  [52, {name:"Set Work Coordinate System", level:"visual"}],
+  [53, {name:"Non-Modal Machine Coordinate Selection", level:"visual"}],
+  [54, {name:"Select Work Coordinate System #1", level:"visual"}],
+  [55, {name:"Select Work Coordinate System #2", level:"visual"}],
+  [56, {name:"Select Work Coordinate System #3", level:"visual"}],
+  [57, {name:"Select Work Coordinate System #4", level:"visual"}],
+  [58, {name:"Select Work Coordinate System #5", level:"visual"}],
+  [59, {name:"Select Work Coordinate System #6", level:"visual"}],
+  [60, {name:"Uni-Directional Positioning", level:"visual"}],
+  [61, {name:"Exact Stop Mode", level:"visual"}],
+  [64, {name:"G61 Cancel", level:"visual"}],
+  [65, {name:"Macro Subprogram Call Option", level:"approx"}],
+  [68, {name:"Rotation", level:"visual"}],
+  [69, {name:"Cancel G68 Rotation", level:"visual"}],
+  [70, {name:"Bolt Hole Circle", level:"visual"}],
+  [71, {name:"Bolt Hole Arc", level:"visual"}],
+  [72, {name:"Bolt Holes Along an Angle", level:"visual"}],
+  [73, {name:"High-Speed Peck Drilling Canned Cycle", level:"visual"}],
+  [74, {name:"Reverse Tap Canned Cycle", level:"visual"}],
+  [76, {name:"Fine Boring Canned Cycle", level:"visual"}],
+  [77, {name:"Back Bore Canned Cycle", level:"visual"}],
+  [80, {name:"Canned Cycle Cancel", level:"visual"}],
+  [81, {name:"Drill Canned Cycle", level:"visual"}],
+  [82, {name:"Spot Drill Canned Cycle", level:"visual"}],
+  [83, {name:"Normal Peck Drilling Canned Cycle", level:"visual"}],
+  [84, {name:"Tapping Canned Cycle", level:"visual"}],
+  [85, {name:"Boring Canned Cycle", level:"visual"}],
+  [86, {name:"Bore and Stop Canned Cycle", level:"visual"}],
+  [89, {name:"Bore In, Dwell, Bore Out Canned Cycle", level:"visual"}],
+  [90, {name:"Absolute Position Command", level:"visual"}],
+  [91, {name:"Incremental Position Command", level:"visual"}],
+  [92, {name:"Set Work Coordinate Systems Shift Value", level:"visual"}],
+  [93, {name:"Inverse Time Feed Mode", level:"visual"}],
+  [94, {name:"Feed Per Minute Mode", level:"visual"}],
+  [95, {name:"Feed per Revolution", level:"visual"}],
+  [98, {name:"Canned Cycle Initial Point Return", level:"visual"}],
+  [99, {name:"Canned Cycle R Plane Return", level:"visual"}],
+  [100, {name:"Cancel Mirror Image", level:"visual"}],
+  [101, {name:"Enable Mirror Image", level:"visual"}],
+  [103, {name:"Limit Block Buffering", level:"visual"}],
+  [107, {name:"Cylindrical Mapping", level:"approx"}],
+  [110, {name:"#7 Coordinate System", level:"visual"}],
+  [111, {name:"#8 Coordinate System", level:"visual"}],
+  [112, {name:"#9 Coordinate System", level:"visual"}],
+  [113, {name:"#10 Coordinate System", level:"visual"}],
+  [114, {name:"#11 Coordinate System", level:"visual"}],
+  [115, {name:"#12 Coordinate System", level:"visual"}],
+  [116, {name:"#13 Coordinate System", level:"visual"}],
+  [117, {name:"#14 Coordinate System", level:"visual"}],
+  [118, {name:"#15 Coordinate System", level:"visual"}],
+  [119, {name:"#16 Coordinate System", level:"visual"}],
+  [120, {name:"#17 Coordinate System", level:"visual"}],
+  [121, {name:"#18 Coordinate System", level:"visual"}],
+  [122, {name:"#19 Coordinate System", level:"visual"}],
+  [123, {name:"#20 Coordinate System", level:"visual"}],
+  [124, {name:"#21 Coordinate System", level:"visual"}],
+  [125, {name:"#22 Coordinate System", level:"visual"}],
+  [126, {name:"#23 Coordinate System", level:"visual"}],
+  [127, {name:"#24 Coordinate System", level:"visual"}],
+  [128, {name:"#25 Coordinate System", level:"visual"}],
+  [129, {name:"#26 Coordinate System", level:"visual"}],
+  [136, {name:"Automatic Work Offset Center Measurement", level:"approx"}],
+  [141, {name:"3D+ Cutter Compensation", level:"approx"}],
+  [143, {name:"5-Axis Tool Length Compensation +", level:"approx"}],
+  [150, {name:"General Purpose Pocket Milling", level:"approx"}],
+  [154, {name:"Select Work Coordinates P1-P99", level:"visual"}],
+  [156, {name:"Broaching Canned Cycle", level:"approx"}],
+  [167, {name:"Modify Setting", level:"approx"}],
+  [174, {name:"CCW Non-Vertical Rigid Tap", level:"approx"}],
+  [184, {name:"CW Non-Vertical Rigid Tap", level:"approx"}],
+  [187, {name:"Setting the Smoothness Level", level:"visual"}],
+  [234, {name:"Tool Center Point Control (TCPC)", level:"approx"}],
+  [253, {name:"G253 Orient Spindle Normal To Feature Coordinate System", level:"approx"}],
+  [254, {name:"Dynamic Work Offset (DWO)", level:"approx"}],
+  [255, {name:"Cancel Dynamic Work Offset (DWO)", level:"visual"}],
+  [266, {name:"Visible Axes Linear Rapid % Motion", level:"approx"}],
+  [268, {name:"Enable Feature Coordinate System", level:"approx"}],
+  [269, {name:"Disable Feature Coordinate System", level:"visual"}],
+]);
+const ALPHA_GCODE_COUNT = HAAS_GCODE_ALPHA.size;
+const ALPHA_GCODE_NUMS = new Set([0,1,2,3,4,9,10,12,13,17,18,19,20,21,28,29,31,35,36,37,40,41,42,43,44,47,49,50,51,52,53,54,55,56,57,58,59,60,61,64,65,68,69,70,71,72,73,74,76,77,80,81,82,83,84,85,86,89,90,91,92,93,94,95,98,99,100,101,103,107,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,136,141,143,150,154,156,167,174,184,187,234,253,254,255,266,268,269]);
+
 const CANNED_CYCLE_NUMS = new Set([73,74,76,77,81,82,83,84,85,86,87,88,89]);
 const KNOWN_M_NUMS = new Set([0,1,2,3,4,5,6,8,9,10,11,12,13,16,17,18,19,30,31,33,34,35,36,39,41,42,50,59,69,75,76,77,78,79,80,81,82,83,84,86,88,89,93,94,95,96,97,98,99,101,102,103,109]);
-const COMMON_G_NUMS = new Set([0,1,2,3,4,9,10,12,13,17,18,19,20,21,28,29,31,35,36,37,40,41,42,43,44,47,49,50,51,52,53,54,55,56,57,58,59,60,61,64,65,68,69,70,71,72,73,74,76,77,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,98,99,100,101,102,103,107,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,136,141,143,150,153,154,155,161,162,163,164,165,166,169,174,184,187,188]);
+const COMMON_G_NUMS = new Set([...ALPHA_GCODE_NUMS,87,88,102,153,155,161,162,163,164,165,166,169,188]);
+
+const alphaState = {
+  seen:new Set(),
+  noted:new Set(),
+  program:{x:0,y:0,z:0},
+  scaling:{active:false,factor:1,center:{x:0,y:0,z:0}},
+  rotation:{active:false,angle:0,plane:'G17',center:{x:0,y:0,z:0}},
+  mirror:{x:null,y:null,z:null},
+  localShift:{x:0,y:0,z:0},
+  g92Shift:{x:0,y:0,z:0},
+  workOffsets:new Map(),
+  toolLength:new Map(),
+  toolDiameter:new Map(),
+  extendedWCS:'G54',
+  cylindricalMap:false,
+  tcpc:false,
+  dwo:false,
+  featureCS:false,
+  smoothness:null,
+  feedMode:'G94',
+  exactStop:false,
+  events:[]
+};
+
+function alphaResetState(){
+  alphaState.seen.clear();
+  alphaState.noted.clear();
+  alphaState.program={x:0,y:0,z:0};
+  alphaState.scaling={active:false,factor:1,center:{x:0,y:0,z:0}};
+  alphaState.rotation={active:false,angle:0,plane:'G17',center:{x:0,y:0,z:0}};
+  alphaState.mirror={x:null,y:null,z:null};
+  alphaState.localShift={x:0,y:0,z:0};
+  alphaState.g92Shift={x:0,y:0,z:0};
+  alphaState.workOffsets=new Map();
+  alphaState.toolLength=new Map();
+  alphaState.toolDiameter=new Map();
+  alphaState.extendedWCS='G54';
+  alphaState.cylindricalMap=false;
+  alphaState.tcpc=false;
+  alphaState.dwo=false;
+  alphaState.featureCS=false;
+  alphaState.smoothness=null;
+  alphaState.feedMode='G94';
+  alphaState.exactStop=false;
+  alphaState.events=[];
+}
+
+function alphaUnits(v){
+  if (!Number.isFinite(v)) return v;
+  return machine.units==='G21' ? v/25.4 : v;
+}
+function alphaWCSKey(){
+  return machine.workOffset || alphaState.extendedWCS || 'G54';
+}
+function alphaOffsetFor(key){
+  return alphaState.workOffsets.get(key) || {x:0,y:0,z:0};
+}
+function alphaAxisValue(words,letter){
+  const v=lastNumeric(words,letter);
+  return Number.isFinite(v) ? alphaUnits(v) : null;
+}
+function alphaRotate2D(u,v,cu,cv,deg){
+  const a=deg*Math.PI/180;
+  const c=Math.cos(a), s=Math.sin(a);
+  const du=u-cu, dv=v-cv;
+  return {u:cu+du*c-dv*s,v:cv+du*s+dv*c};
+}
+function alphaTransformPoint(p, bypassWCS=false){
+  let q={x:p.x,y:p.y,z:p.z};
+
+  for (const axis of ['x','y','z']) {
+    const pivot=alphaState.mirror[axis];
+    if (Number.isFinite(pivot)) q[axis]=2*pivot-q[axis];
+  }
+
+  if (alphaState.scaling.active) {
+    const c=alphaState.scaling.center;
+    const f=alphaState.scaling.factor;
+    q.x=c.x+(q.x-c.x)*f;
+    q.y=c.y+(q.y-c.y)*f;
+    q.z=c.z+(q.z-c.z)*f;
+  }
+
+  if (alphaState.rotation.active) {
+    const c=alphaState.rotation.center;
+    const a=alphaState.rotation.angle;
+    if (alphaState.rotation.plane==='G18') {
+      const r=alphaRotate2D(q.x,q.z,c.x,c.z,a); q.x=r.u; q.z=r.v;
+    } else if (alphaState.rotation.plane==='G19') {
+      const r=alphaRotate2D(q.y,q.z,c.y,c.z,a); q.y=r.u; q.z=r.v;
+    } else {
+      const r=alphaRotate2D(q.x,q.y,c.x,c.y,a); q.x=r.u; q.y=r.v;
+    }
+  }
+
+  if (!bypassWCS) {
+    const w=alphaOffsetFor(alphaWCSKey());
+    q.x += w.x + alphaState.localShift.x + alphaState.g92Shift.x;
+    q.y += w.y + alphaState.localShift.y + alphaState.g92Shift.y;
+    q.z += w.z + alphaState.localShift.z + alphaState.g92Shift.z;
+  }
+  return q;
+}
+function alphaRawTarget(words){
+  const p={...alphaState.program};
+  for (const [letter,axis] of [['X','x'],['Y','y'],['Z','z']]) {
+    const raw=lastNumeric(words,letter);
+    if (!Number.isFinite(raw)) continue;
+    const v=alphaUnits(raw);
+    if (machine.dist==='G91') p[axis]+=v;
+    else p[axis]=v;
+  }
+  return p;
+}
+function alphaSetWorkOffset(key,axisValues,incremental=false){
+  const old={...alphaOffsetFor(key)};
+  for (const axis of ['x','y','z']) {
+    const v=axisValues[axis];
+    if (!Number.isFinite(v)) continue;
+    old[axis]=incremental ? old[axis]+v : v;
+  }
+  alphaState.workOffsets.set(key,old);
+}
+function alphaHandleG10(words){
+  const l=lastInt(words,'L'), p=lastInt(words,'P');
+  if (!Number.isFinite(l) || !Number.isFinite(p)) return;
+  const vals={x:alphaAxisValue(words,'X'),y:alphaAxisValue(words,'Y'),z:alphaAxisValue(words,'Z')};
+  const incremental=hasGNum(words,91) || (!hasGNum(words,90) && machine.dist==='G91');
+  const r=lastNumeric(words,'R');
+
+  if (l===2) {
+    const key=p===0 ? 'G52' : (p>=1 && p<=6 ? `G${53+p}` : null);
+    if (key==='G52') {
+      for (const axis of ['x','y','z']) if (Number.isFinite(vals[axis])) alphaState.localShift[axis]=incremental ? alphaState.localShift[axis]+vals[axis] : vals[axis];
+    } else if (key) alphaSetWorkOffset(key,vals,incremental);
+  } else if (l===20) {
+    if (p>=1 && p<=20) alphaSetWorkOffset(`G${109+p}`,vals,incremental);
+    if (p>=1 && p<=99) alphaSetWorkOffset(`G154P${p}`,vals,incremental);
+  } else if ((l===10 || l===1 || l===11) && Number.isFinite(r)) {
+    const old=alphaState.toolLength.get(p)||0;
+    alphaState.toolLength.set(p,incremental?old+alphaUnits(r):alphaUnits(r));
+  } else if ((l===12 || l===13) && Number.isFinite(r)) {
+    const old=alphaState.toolDiameter.get(p)||0;
+    alphaState.toolDiameter.set(p,incremental?old+alphaUnits(r):alphaUnits(r));
+  }
+}
+function alphaNoteCode(g,lineLabel){
+  const meta=HAAS_GCODE_ALPHA.get(g);
+  if (!meta || meta.level==='visual' || alphaState.noted.has(g)) return;
+  alphaState.noted.add(g);
+  const label=fmtG(g);
+  const detail=meta.level==='approx'
+    ? `${meta.name} is recognized and modeled with a safe visual/state approximation in this alpha fork. Verify controller-specific behavior at the Haas control/CAM simulation.`
+    : `${meta.name} is recognized and its modal/state effect is tracked, but this 3-axis browser backplot does not reproduce the machine hardware/control behavior.`;
+  addCheckerIssue(lineLabel,'info',`${label} alpha support`,detail);
+}
+function alphaHandleStateCodes(words,gNums,lineLabel){
+  for (const g of gNums) {
+    if (HAAS_GCODE_ALPHA.has(g)) {
+      alphaState.seen.add(g);
+      alphaNoteCode(g,lineLabel);
+    }
+  }
+
+  if (gNums.includes(10)) alphaHandleG10(words);
+
+  if (gNums.includes(50)) alphaState.scaling.active=false;
+  if (gNums.includes(51)) {
+    const p=lastNumeric(words,'P');
+    const c={...alphaState.program};
+    for (const [letter,axis] of [['X','x'],['Y','y'],['Z','z']]) {
+      const v=alphaAxisValue(words,letter); if (Number.isFinite(v)) c[axis]=v;
+    }
+    alphaState.scaling={active:true,factor:Number.isFinite(p)?p:1,center:c};
+  }
+
+  if (gNums.includes(68)) {
+    const r=lastNumeric(words,'R');
+    const c={...alphaState.program};
+    for (const [letter,axis] of [['X','x'],['Y','y'],['Z','z']]) {
+      const v=alphaAxisValue(words,letter); if (Number.isFinite(v)) c[axis]=v;
+    }
+    const delta=(machine.dist==='G91' && Number.isFinite(r)) ? r : null;
+    alphaState.rotation={
+      active:true,
+      angle:Number.isFinite(delta)?alphaState.rotation.angle+delta:(Number.isFinite(r)?r:alphaState.rotation.angle),
+      plane:machine.plane||'G17',
+      center:c
+    };
+  }
+  if (gNums.includes(69)) alphaState.rotation.active=false;
+
+  if (gNums.includes(101) || gNums.includes(100)) {
+    const enable=gNums.includes(101);
+    let touched=false;
+    for (const [letter,axis] of [['X','x'],['Y','y'],['Z','z']]) {
+      if (!hasWordLetter(words,letter)) continue;
+      touched=true;
+      const v=alphaAxisValue(words,letter);
+      alphaState.mirror[axis]=enable ? (Number.isFinite(v)?v:0) : null;
+    }
+    if (!touched && !enable) alphaState.mirror={x:null,y:null,z:null};
+  }
+
+  if (gNums.includes(52)) {
+    for (const [letter,axis] of [['X','x'],['Y','y'],['Z','z']]) {
+      const v=alphaAxisValue(words,letter);
+      if (Number.isFinite(v)) alphaState.localShift[axis]=v;
+    }
+  }
+
+  if (gNums.includes(92)) {
+    const w=alphaOffsetFor(alphaWCSKey());
+    for (const [letter,axis] of [['X','x'],['Y','y'],['Z','z']]) {
+      const desired=alphaAxisValue(words,letter);
+      if (!Number.isFinite(desired)) continue;
+      const current=machine[axis];
+      alphaState.g92Shift[axis]=current-w[axis]-alphaState.localShift[axis]-desired;
+    }
+  }
+
+  if (gNums.includes(107)) alphaState.cylindricalMap=true;
+  if (gNums.includes(234)) alphaState.tcpc=true;
+  if (gNums.includes(49)) alphaState.tcpc=false;
+  if (gNums.includes(254)) alphaState.dwo=true;
+  if (gNums.includes(255)) alphaState.dwo=false;
+  if (gNums.includes(268)) alphaState.featureCS=true;
+  if (gNums.includes(269)) alphaState.featureCS=false;
+  if (gNums.includes(187)) alphaState.smoothness={p:lastNumeric(words,'P'),e:lastNumeric(words,'E')};
+  if (gNums.includes(93)) alphaState.feedMode='G93';
+  if (gNums.includes(94)) alphaState.feedMode='G94';
+  if (gNums.includes(95)) alphaState.feedMode='G95';
+  if (gNums.includes(61)) alphaState.exactStop=true;
+  if (gNums.includes(64)) alphaState.exactStop=false;
+
+  if (gNums.includes(154)) {
+    const p=lastInt(words,'P');
+    if (Number.isFinite(p) && p>=1 && p<=99) {
+      machine.workOffset=`G154P${p}`;
+      alphaState.extendedWCS=machine.workOffset;
+    }
+  }
+}
+function alphaParameterOnlyBlock(gNums){
+  const parameterCodes=new Set([10,35,36,37,47,50,51,52,65,68,69,92,100,101,103,107,136,167,187,234,253,254,255,268,269]);
+  const hasExplicitMotion=gNums.some(g=>[0,1,2,3,31,60,266,156,174,184].includes(g));
+  return !hasExplicitMotion && gNums.some(g=>parameterCodes.has(g));
+}
+function alphaAddMove(move){
+  const idx=moves.length;
+  moves.push(move);
+  modalSnapshots.push({
+    motion:move.type,dist:machine.dist,cutterComp:machine.cutterComp,
+    cycle:machine.cycle||'G80',tool:machine.tool,spindle:machine.spindle||0,feed:machine.feed||0
+  });
+  addToolLength(machine.tool,move.length2D||0);
+  return idx;
+}
+function alphaAppendPatternPoint(rawX,rawY,activeCycle,lineLabel,lineIndex){
+  const raw={x:rawX,y:rawY,z:alphaState.program.z};
+  const pt=alphaTransformPoint(raw,false);
+  const returnZ=activeCycle && activeCycle.retractMode===98 ? activeCycle.initialPlaneZ : (activeCycle ? activeCycle.rPlaneZ : machine.z);
+  const z=Number.isFinite(returnZ)?returnZ:machine.z;
+  const m={
+    type:'G0',fromX:machine.x,fromY:machine.y,fromZ:machine.z,
+    toX:pt.x,toY:pt.y,toZ:z,isArc:false,i:0,j:0,radius:null,
+    compMode:machine.cutterComp,tool:machine.tool,feed:machine.feed,spindle:machine.spindle,
+    lineLabel,lineIndex,length2D:Math.hypot(pt.x-machine.x,pt.y-machine.y),
+    bad:false,outsideStock:false,canned:true,alphaGenerated:true
+  };
+  const idx=alphaAddMove(m);
+  drillPoints.push({x:pt.x,y:pt.y,z:activeCycle&&Number.isFinite(activeCycle.bottomZ)?activeCycle.bottomZ:z,tool:machine.tool,index:idx,cycle:machine.cycle||'Pattern'});
+  machine.x=pt.x; machine.y=pt.y; machine.z=z;
+  alphaState.program.x=rawX; alphaState.program.y=rawY;
+  return idx;
+}
+function alphaHandleBoltPattern(words,gNums,activeCycle,lineLabel,lineIndex){
+  const code=gNums.find(g=>g===70||g===71||g===72);
+  if (!code) return false;
+  if (!activeCycle || !machine.cycle) {
+    addCheckerIssue(lineLabel,'error',`${fmtG(code)} requires an active canned cycle`,'Start G73/G74/G76/G77 or G81-G89 before the bolt-pattern command.');
+    return true;
+  }
+  const I=alphaAxisValue(words,'I');
+  const J=lastNumeric(words,'J');
+  const K=lastNumeric(words,'K');
+  const L=lastInt(words,'L');
+  if (!Number.isFinite(I) || !Number.isFinite(L) || L<=0) {
+    addCheckerIssue(lineLabel,'error',`${fmtG(code)} is missing pattern data`,'Provide a valid I value and positive L hole count.');
+    return true;
+  }
+  const sx=alphaState.program.x, sy=alphaState.program.y;
+  if (code===70) {
+    const start=Number.isFinite(J)?J:0;
+    for (let n=0;n<L;n++) {
+      const a=(start+(360/L)*n)*Math.PI/180;
+      alphaAppendPatternPoint(sx+I*Math.cos(a),sy+I*Math.sin(a),activeCycle,lineLabel,lineIndex);
+    }
+  } else if (code===71) {
+    if (!Number.isFinite(K)) {
+      addCheckerIssue(lineLabel,'error','G71 is missing K angular spacing','Add K degrees between holes.');
+      return true;
+    }
+    const start=Number.isFinite(J)?J:0;
+    for (let n=0;n<L;n++) {
+      const a=(start+K*n)*Math.PI/180;
+      alphaAppendPatternPoint(sx+I*Math.cos(a),sy+I*Math.sin(a),activeCycle,lineLabel,lineIndex);
+    }
+  } else {
+    const angle=(Number.isFinite(J)?J:0)*Math.PI/180;
+    for (let n=0;n<L;n++) {
+      const d=I*(n+1);
+      alphaAppendPatternPoint(sx+d*Math.cos(angle),sy+d*Math.sin(angle),activeCycle,lineLabel,lineIndex);
+    }
+  }
+  return true;
+}
+function alphaHandleCircularPocket(words,gNums,lineLabel,lineIndex){
+  const code=gNums.find(g=>g===12||g===13);
+  if (!code) return false;
+  const i=alphaAxisValue(words,'I');
+  const k=alphaAxisValue(words,'K');
+  const q=alphaAxisValue(words,'Q');
+  const zWord=lastNumeric(words,'Z');
+  if (!Number.isFinite(i) || i<=0) {
+    addCheckerIssue(lineLabel,'error',`${fmtG(code)} requires a positive I radius`,'Add I for the first/finish circular pocket radius.');
+    return true;
+  }
+  const finalR=Number.isFinite(k)&&k>i?k:i;
+  const step=Number.isFinite(q)&&q>0?q:Math.max(finalR-i,finalR);
+  let depth=machine.z;
+  if (Number.isFinite(zWord)) {
+    const dz=alphaUnits(zWord);
+    depth=machine.dist==='G91'?machine.z+dz:alphaTransformPoint({...alphaState.program,z:dz},false).z;
+  }
+  const rawCenter={...alphaState.program};
+  const radii=[];
+  for (let r=i;r<finalR-1e-8;r+=step) radii.push(r);
+  radii.push(finalR);
+  for (const rRaw of radii) {
+    const startRaw={x:rawCenter.x+rRaw,y:rawCenter.y,z:rawCenter.z};
+    const start=alphaTransformPoint(startRaw,false);
+    if (Math.hypot(start.x-machine.x,start.y-machine.y)>1e-9 || Math.abs(depth-machine.z)>1e-9) {
+      alphaAddMove({
+        type:'G1',fromX:machine.x,fromY:machine.y,fromZ:machine.z,toX:start.x,toY:start.y,toZ:depth,
+        isArc:false,i:0,j:0,radius:null,compMode:machine.cutterComp,tool:machine.tool,feed:machine.feed,
+        spindle:machine.spindle,lineLabel,lineIndex,length2D:Math.hypot(start.x-machine.x,start.y-machine.y),
+        bad:false,outsideStock:false,alphaGenerated:true
+      });
+      machine.x=start.x; machine.y=start.y; machine.z=depth;
+    }
+    const center=alphaTransformPoint(rawCenter,false);
+    const arc={
+      type:code===12?'G2':'G3',fromX:machine.x,fromY:machine.y,fromZ:depth,toX:machine.x,toY:machine.y,toZ:depth,
+      isArc:true,i:center.x-machine.x,j:center.y-machine.y,radius:Math.hypot(machine.x-center.x,machine.y-center.y),
+      compMode:code===12?'G42':'G41',tool:machine.tool,feed:machine.feed,spindle:machine.spindle,
+      lineLabel,lineIndex,length2D:2*Math.PI*Math.hypot(machine.x-center.x,machine.y-center.y),
+      bad:false,outsideStock:false,alphaGenerated:true
+    };
+    alphaAddMove(arc);
+  }
+  const center=alphaTransformPoint(rawCenter,false);
+  alphaAddMove({
+    type:'G1',fromX:machine.x,fromY:machine.y,fromZ:machine.z,toX:center.x,toY:center.y,toZ:depth,
+    isArc:false,i:0,j:0,radius:null,compMode:'G40',tool:machine.tool,feed:machine.feed,spindle:machine.spindle,
+    lineLabel,lineIndex,length2D:Math.hypot(center.x-machine.x,center.y-machine.y),
+    bad:false,outsideStock:false,alphaGenerated:true
+  });
+  machine.x=center.x; machine.y=center.y; machine.z=depth;
+  return true;
+}
 const G_GROUPS_MACT = new Map([
   [0,1],[1,1],[2,1],[3,1],
   [17,2],[18,2],[19,2],
@@ -1715,13 +2235,15 @@ const G_GROUPS_MACT = new Map([
   [93,5],[94,5],[95,5],
   [20,6],[21,6],
   [40,7],[41,7],[42,7],[141,7],
-  [43,8],[44,8],[49,8],[143,8],
+  [43,8],[44,8],[49,8],[143,8],[234,8],
   [73,9],[74,9],[76,9],[77,9],[80,9],[81,9],[82,9],[83,9],[84,9],[85,9],[86,9],[87,9],[88,9],[89,9],[153,9],[155,9],[161,9],[162,9],[163,9],[164,9],[165,9],[166,9],[169,9],
   [98,10],[99,10],
   [50,11],[51,11],
   [54,12],[55,12],[56,12],[57,12],[58,12],[59,12],[110,12],[111,12],[112,12],[113,12],[114,12],[115,12],[116,12],[117,12],[118,12],[119,12],[120,12],[121,12],[122,12],[123,12],[124,12],[125,12],[126,12],[127,12],[128,12],[129,12],
   [61,13],[64,13],
-  [68,16],[69,16]
+  [68,16],[69,16],
+  [268,14],[269,14],
+  [254,23],[255,23]
 ]);
 
 function normCodeNumber(value){
@@ -1784,6 +2306,9 @@ function loadAndDraw() {
   machine.workOffset = 'G54';
   machine.lengthComp = 'G49';
   machine.coolant = false;
+  machine.feedMode = 'G94';
+  machine.pathMode = 'G64';
+  alphaResetState();
 
   moves = [];
   drillPoints = [];
@@ -1842,6 +2367,11 @@ function loadAndDraw() {
     const rVal = lastNumeric(words,'R');
     const pVal = lastNumeric(words,'P');
     const qVal = lastNumeric(words,'Q');
+    const kValRaw = lastNumeric(words,'K');
+    const lVal = lastInt(words,'L');
+    const aVal = lastNumeric(words,'A');
+    const bVal = lastNumeric(words,'B');
+    const cVal = lastNumeric(words,'C');
     const hVal = lastInt(words,'H');
     const dVal = lastInt(words,'D');
     const tVal = lastInt(words,'T');
@@ -1868,6 +2398,7 @@ function loadAndDraw() {
     const hasG42 = hasGNum(words,42);
     const hasG43 = hasGNum(words,43);
     const hasG49 = hasGNum(words,49);
+    const hasG53 = hasGNum(words,53);
     const hasG80 = hasGNum(words,80);
     const hasG90 = hasGNum(words,90);
     const hasG91 = hasGNum(words,91);
@@ -1953,14 +2484,21 @@ function loadAndDraw() {
       else if (g === 3) machine.motion = 'G3';
       else if (g === 17 || g === 18 || g === 19) machine.plane = fmtG(g);
       else if (g === 20 || g === 21) machine.units = fmtG(g);
-      else if (g === 40 || g === 41 || g === 42) machine.cutterComp = fmtG(g);
-      else if (g === 43 || g === 44 || g === 49) machine.lengthComp = fmtG(g);
+      else if (g === 40 || g === 41 || g === 42 || g === 141) machine.cutterComp = fmtG(g);
+      else if (g === 43 || g === 44 || g === 49 || g === 143 || g === 234) machine.lengthComp = fmtG(g);
       else if (g === 54 || g === 55 || g === 56 || g === 57 || g === 58 || g === 59 || (g >= 110 && g <= 129)) machine.workOffset = fmtG(g);
       else if (g === 80) machine.cycle = null;
       else if (CANNED_CYCLE_NUMS.has(g)) machine.cycle = fmtG(g);
       else if (g === 90 || g === 91) machine.dist = fmtG(g);
+      else if (g === 93 || g === 94 || g === 95) machine.feedMode = fmtG(g);
       else if (g === 98 || g === 99) machine.returnPlane = fmtG(g);
+      else if (g === 61 || g === 64) machine.pathMode = fmtG(g);
+      else if (g === 31) machine.motion = 'G1';
+      else if (g === 60 || g === 266) machine.motion = 'G0';
+      else if (g === 156 || g === 174 || g === 184) machine.motion = 'G1';
     }
+
+    alphaHandleStateCodes(words,gNums,thisLineLabel);
 
     if (Number.isFinite(sVal)) machine.spindle = sVal;
     if (Number.isFinite(fVal)) machine.feed = fVal;
@@ -2022,11 +2560,13 @@ function loadAndDraw() {
       const initialPlaneZ = machine.z;
       const initialPlaneLine = lastExplicitZ ? lastExplicitZ.line : null;
       const retractMode = hasG98 ? 98 : hasG99 ? 99 : (machine.returnPlane === 'G99' ? 99 : 98);
-      const actualR = Number.isFinite(rVal) ? (machine.dist === 'G91' ? initialPlaneZ + rVal : rVal) : null;
-      const bottomZ = Number.isFinite(zVal)
+      const rInternal = Number.isFinite(rVal) ? alphaUnits(rVal) : null;
+      const zInternal = Number.isFinite(zVal) ? alphaUnits(zVal) : null;
+      const actualR = Number.isFinite(rInternal) ? (machine.dist === 'G91' ? initialPlaneZ + rInternal : rInternal) : null;
+      const bottomZ = Number.isFinite(zInternal)
         ? (machine.dist === 'G91'
-          ? (Number.isFinite(actualR) ? actualR + zVal : initialPlaneZ + zVal)
-          : zVal)
+          ? (Number.isFinite(actualR) ? actualR + zInternal : initialPlaneZ + zInternal)
+          : zInternal)
         : null;
 
       if (!lastExplicitZ) {
@@ -2108,13 +2648,35 @@ function loadAndDraw() {
       addCheckerIssue(thisLineLabel, 'error', 'Program ends with canned cycle still active', 'Add G80 before M30.');
     }
 
-    // Target math.
-    let tx = machine.x, ty = machine.y, tz = machine.z;
-    if (hasX && Number.isFinite(xVal)) tx = (machine.dist === 'G90') ? xVal : machine.x + xVal;
-    if (hasY && Number.isFinite(yVal)) ty = (machine.dist === 'G90') ? yVal : machine.y + yVal;
-    if (hasZ && Number.isFinite(zVal)) tz = (machine.dist === 'G90') ? zVal : machine.z + zVal;
+    // Alpha-generated Group 00 geometry.
+    if (alphaHandleBoltPattern(words,gNums,activeCannedCycle,thisLineLabel,li)) {
+      continue;
+    }
+    if (alphaHandleCircularPocket(words,gNums,thisLineLabel,li)) {
+      continue;
+    }
 
-    const isCannedPoint = !!(activeCannedCycle && machine.cycle && (cannedHereNum || hasX || hasY));
+    // Parameter/state-only blocks use axis letters as arguments rather than motion endpoints.
+    const alphaSuppressAxisMotion = alphaParameterOnlyBlock(gNums);
+
+    // Target math uses an internal programmed-coordinate position, then applies
+    // work offsets, scaling, rotation, mirroring, and unit conversion.
+    const alphaRaw = alphaRawTarget(words);
+    const alphaTarget = alphaTransformPoint(alphaRaw,hasG53);
+    let tx = machine.x, ty = machine.y, tz = machine.z;
+    if (!alphaSuppressAxisMotion && (hasX || hasY || hasZ)) {
+      tx = alphaTarget.x; ty = alphaTarget.y; tz = alphaTarget.z;
+    }
+
+    // G28 returns selected axes to machine zero after its optional intermediate point.
+    if (gNums.includes(28)) {
+      if (hasX) tx=0;
+      if (hasY) ty=0;
+      if (hasZ) tz=0;
+    }
+
+    const skipInitialCannedPoint = !!(cannedHereNum && Number.isFinite(lVal) && lVal===0);
+    const isCannedPoint = !!(activeCannedCycle && machine.cycle && !skipInitialCannedPoint && (cannedHereNum || hasX || hasY));
     if (isCannedPoint) {
       // Plot the XY travel between holes at the current retract height, then mark the hole.
       const returnZ = activeCannedCycle.retractMode === 98 ? activeCannedCycle.initialPlaneZ : activeCannedCycle.rPlaneZ;
@@ -2145,8 +2707,18 @@ function loadAndDraw() {
       machine.x = tx;
       machine.y = ty;
       machine.z = targetZForMove;
+      alphaState.program = alphaRaw;
     } else {
-      let isMotion = (tx !== machine.x) || (ty !== machine.y) || (tz !== machine.z);
+      if (gNums.includes(31)) {
+        addCheckerIssue(thisLineLabel,'info','G31 feed-until-skip visualized to programmed endpoint','A browser emulator has no probe/skip input, so the path is drawn to the programmed endpoint. The real machine may stop earlier when the skip signal is received.');
+      }
+      if (gNums.includes(156)) {
+        addCheckerIssue(thisLineLabel,'info','G156 broach path approximated','The alpha draws the commanded XYZ endpoint as a feed path. Haas broach pecks/slices, spindle orientation, C-axis behavior, and D-clearance are not kinematically reproduced.');
+      }
+      if (gNums.includes(174) || gNums.includes(184)) {
+        addCheckerIssue(thisLineLabel,'info','Non-vertical rigid tap approximated in XYZ','Rotary-axis orientation and rigid-tap synchronization are tracked as controller behavior; the 3-axis canvas shows only the visible XYZ component.');
+      }
+      let isMotion = !alphaSuppressAxisMotion && ((tx !== machine.x) || (ty !== machine.y) || (tz !== machine.z));
       if ((machine.motion === 'G2' || machine.motion === 'G3') && !isMotion && (hasI || hasJ)) {
         isMotion = true; // full circle with same start/end
       }
@@ -2273,6 +2845,7 @@ function loadAndDraw() {
         machine.x = tx;
         machine.y = ty;
         machine.z = tz;
+        alphaState.program = alphaRaw;
       } else {
         const lastIndex = moves.length - 1;
         if (lastIndex >= 0) {
@@ -2398,7 +2971,10 @@ function draw() {
 
   const infoEl = document.getElementById('info');
   if (!moves.length && !drillPoints.length && !stockBounds) {
-    if (infoEl) infoEl.textContent='No moves parsed.';
+    if (infoEl) {
+      const seen=[...alphaState.seen].sort((a,b)=>a-b).map(fmtG).join(' ');
+      infoEl.textContent=`No plotted moves.\nAlpha registry: ${ALPHA_GCODE_COUNT} / 107 requested codes\nSeen: ${seen || 'none'}`;
+    }
     return;
   }
 
@@ -2816,6 +3392,22 @@ function draw() {
     } else {
       infoText+=`\nErrors: none detected (basic checks only).\n`;
     }
+    infoText+=`\nAlpha G-code support:\n`;
+    infoText+=`  Registry: ${ALPHA_GCODE_COUNT} / 107 requested codes\n`;
+    infoText+=`  Seen in program: ${alphaState.seen.size}\n`;
+    if (alphaState.seen.size){
+      const seen=[...alphaState.seen].sort((a,b)=>a-b).map(fmtG).join(' ');
+      infoText+=`  ${seen}\n`;
+    }
+    const approx=[...alphaState.seen].filter(g=>HAAS_GCODE_ALPHA.get(g)?.level!=='visual').sort((a,b)=>a-b);
+    if (approx.length) infoText+=`  State/approx: ${approx.map(fmtG).join(' ')}\n`;
+    infoText+=`  WCS: ${machine.workOffset || 'G54'}   Feed: ${alphaState.feedMode}\n`;
+    if (alphaState.scaling.active) infoText+=`  Scale: ${alphaState.scaling.factor}\n`;
+    if (alphaState.rotation.active) infoText+=`  Rotation: ${alphaState.rotation.angle.toFixed(3)} deg ${alphaState.rotation.plane}\n`;
+    if (alphaState.tcpc) infoText+=`  TCPC: ON\n`;
+    if (alphaState.dwo) infoText+=`  DWO: ON\n`;
+    if (alphaState.featureCS) infoText+=`  Feature CS: ON\n`;
+
     infoEl.textContent=infoText;
   }
 
@@ -3582,6 +4174,17 @@ function downloadFixReport(){
   setTimeout(()=>{ URL.revokeObjectURL(a.href); document.body.removeChild(a); },0);
 }
 
+function renderAlphaCoverageList(){
+  const el=document.getElementById('alphaCoverageList');
+  if (!el) return;
+  const groups={visual:[],approx:[],tracked:[]};
+  for (const [g,meta] of HAAS_GCODE_ALPHA.entries()) groups[meta.level].push(`${fmtG(g)} — ${meta.name}`);
+  el.innerHTML=['visual','approx','tracked'].map(level=>{
+    const title=level==='visual'?'Visual':level==='approx'?'Approx':'Tracked';
+    return `<div style="margin:6px 0;"><strong>${title} (${groups[level].length})</strong><br>${groups[level].map(escapeHTML).join('<br>')}</div>`;
+  }).join('');
+}
+
 /* ---------- Resizable / collapsible layout ---------- */
 
 const layoutStorageKeys = {
@@ -3918,6 +4521,7 @@ window.addEventListener('load',()=>{
   setupSpeedSlider();
   setupColumnResizer();
   setupCollapsiblePanels();
+  renderAlphaCoverageList();
   updateZoomLabel();
 
   const cbM0=document.getElementById('pauseM0');
